@@ -124,7 +124,7 @@ void InitWeights_Biases(double *Weights_CPU, int size, char* file_path) {
 		}
 		fclose(pFile);
 	}
-	
+
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -132,16 +132,16 @@ void InitWeights_Biases(double *Weights_CPU, int size, char* file_path) {
 /////////////////////////////////////////////////////////////////////////////////////////
 void LoadInput(double *Data_Layer_CPU,char* file_path) {
 #if 0
-// tested with below images
-"data/vgg_rgb.txt"
-"data/cat.1135.jpg.txt"
-"data/dog.4.jpg.txt"
-"data/dog.20.jpg.txt"
-"data/zebra.png.txt"
-"data/zebr1.png.txt"
-"data/new_cat.0.txt"
+	// tested with below images
+	"data/vgg_rgb.txt"
+		"data/cat.1135.jpg.txt"
+		"data/dog.4.jpg.txt"
+		"data/dog.20.jpg.txt"
+		"data/zebra.png.txt"
+		"data/zebr1.png.txt"
+		"data/new_cat.0.txt"
 #endif
-	FILE * pFile = fopen (file_path,"rb");
+		FILE * pFile = fopen (file_path,"rb");
 	if (!pFile) {
 		printf("FAIL! INPUT FILE NOT FOUND!\n");
 		exit(1);
@@ -252,6 +252,74 @@ __global__ void ExecuteConvLayer(double *Layer_Weights_CPU, double *Layer2_Featu
 	}
 }
 
+__global__ void conv(int in_dim, int num_channels, 
+		int filter_dim, int num_filters,
+		double *feature_in, double *filter, double *bias, 
+		int out_dim, double *feature_out) 
+{
+	//int kernel_dim = num_channels;
+	int gid = blockIdx.x * blockDim.x + threadIdx.x;
+	if(gid >= out_dim*out_dim*num_filters)
+	{
+		return;
+	}
+
+	int filter_size = filter_dim * filter_dim;
+	int in_size = in_dim * in_dim;
+	int out_size = out_dim * out_dim;
+	int channel_filter_size = num_channels * filter_size;
+	int padding = (filter_dim - 1) / 2;
+
+	int filter_id = gid / out_size;
+	int row = (gid / out_dim) % out_dim;
+	int col = gid % out_dim;
+
+	double feature = bias[filter_id];
+	for(int ch=0; ch<num_channels; ch++)
+	{
+		for(int i=row-padding; i<=row+padding && i>=0 && i<in_dim; i++) {
+			int r = i-row+padding;
+			for(int j=row-padding; j<=row+padding && j>=0 && j<in_dim ; j++) {
+				int c = j-col+padding;
+				feature += filter[filter_id * channel_filter_size + 
+					ch * filter_size + r * filter_dim + c]
+					* feature_in[ch * in_size + i * in_dim + j];
+			}
+		}
+	}
+	feature_out[filter_id * out_size + row * out_dim + col] = feature;
+
+	//int padding = 1;
+	//int mask_width = 3; //kernel width is 3 for all convolution layers in VGGNET
+	//double features = 0;
+	//int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	//int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+	//for(int f=0; f<out_depth; f++) {
+	//	features = bias[f];
+	//	if(x<in_dim && y<in_dim) {
+	//		for(int n=0; n<num_channels; n++) {// Input Image Depth = 64
+	//			double result = 0;
+	//			for(int i = x-padding; i<=x+padding; i++) {// Padding = 1
+	//				for(int j=y-padding; j<=y+padding; j++) {
+	//					int x_index = i-x+padding;
+	//					int y_index = j-y+padding;
+	//					int m = (y_index)+(x_index)*mask_width;
+	//					result+= feature_in[n*input_dim*input_dim 
+	//						+ (x_index+x-padding)*input_dim+ (y_index+y-padding)]
+	//						* filter[m+f*mask_width*mask_width*kernel_dim+n*mask_width*mask_width]; //Number of kernels =64
+	//				}
+	//			}
+	//			features += result;
+	//		}
+	//	}
+
+	//	//ReLU activation function computation
+	//	if(features<0)
+	//		features = 0;
+	//	feature_out[f*input_dim*input_dim+ x*input_dim+ y] = features;
+	//}
+}
+
 
 /////////////////////////////////////////////////////////////////////////////////////////
 // Device function to execute fourth layer, which is a fully connected layer
@@ -266,7 +334,7 @@ __global__ void ExecuteFcLayer(double *Layer_Weights_CPU, double *Layer_Features
 			}
 		}
 	}
-		result += Layer_Bias[n];
+	result += Layer_Bias[n];
 	if(result < 0 ) { // reLu
 		result  = 0 ;
 	}
@@ -520,11 +588,12 @@ void NeuralNetwork(char *file_path) {
 
 	printf("Executing Second Layer\n");
 	//Execute Second Layer
+	
 	ExecuteConvLayer<<<n_blocks,n_threads>>>(Layer2_Weights_GPU, Layer2_Features, Layer1_Features, 64, 64, IMAGE_WIDTH,Layer2_Weights_Bias_GPU);
 	checkCudaErrors(cudaDeviceSynchronize());
 
 	cudaFree(Layer2_Weights_GPU);
-//--------------------------------------
+	//--------------------------------------
 	double *Pool_Layer_Features;
 	checkCudaErrors(cudaMalloc((void**) &Pool_Layer_Features, 64*(IMAGE_WIDTH/2)*(IMAGE_WIDTH/2)* NUM * sizeof(double)));
 	printf("Executing First Pool Layer\n");
@@ -548,12 +617,19 @@ void NeuralNetwork(char *file_path) {
 	//Execute Third Layer
 	dim3 n1_blocks(4,4,1);
 	dim3 n1_threads(28,28,1);
+	//conv(int in_dim, int num_channels, int filter_dim, int num_filters,
+	//	double *feature_in, double *filter, double *bias, 
+	//	int output_dim, double *feature_out) 
+	int nblocks = (112*112*128 + 256 - 1) / 256;
+	//conv<<<nblocks, 256>>>(IMAGE_WIDTH/2, 64, 3, 128, 
+	//		Pool_Layer_Features, Layer3_Weights_GPU, Layer3_Weights_Bias_GPU,
+	//		IMAGE_WIDTH/2, Layer3_Features);
 	ExecuteConvLayer<<<n1_blocks,n1_threads>>>(Layer3_Weights_GPU, Layer3_Features, Pool_Layer_Features, 128, 64, IMAGE_WIDTH/2,Layer3_Weights_Bias_GPU);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 	checkCudaErrors(cudaFree(Pool_Layer_Features));
 	checkCudaErrors(cudaFree(Layer3_Weights_GPU));
-//-------------------------------------------------------------------------------
+	//-------------------------------------------------------------------------------
 
 	double *Layer4_Weights_GPU;
 	checkCudaErrors(cudaMalloc((void**) &Layer4_Weights_GPU, LAYER4_PARAMS* NUM * sizeof(double)));
@@ -617,7 +693,7 @@ void NeuralNetwork(char *file_path) {
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaFree(Layer6_Weights_GPU));
 	checkCudaErrors(cudaFree(Layer5_Features));
-	
+
 	//------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 	double *Layer7_Weights_GPU;
@@ -625,7 +701,7 @@ void NeuralNetwork(char *file_path) {
 	checkCudaErrors(cudaMemcpy(Layer7_Weights_GPU,Layer7_Weights_CPU, LAYER7_PARAMS* NUM * sizeof(double), cudaMemcpyHostToDevice));
 	double *Layer7_Features;
 	checkCudaErrors(cudaMalloc((void**) &Layer7_Features, 256*(IMAGE_WIDTH/4)*(IMAGE_WIDTH/4)* NUM * sizeof(double)));
-	
+
 	double *Layer7_Weights_Bias_GPU;
 	checkCudaErrors(cudaMalloc((void**) &Layer7_Weights_Bias_GPU, LAYER7_BIAS_PARAMS* NUM * sizeof(double)));
 	checkCudaErrors(cudaMemcpy(Layer7_Weights_Bias_GPU,Layer7_Weights_Bias_CPU, LAYER7_BIAS_PARAMS* NUM * sizeof(double), cudaMemcpyHostToDevice));
@@ -652,7 +728,7 @@ void NeuralNetwork(char *file_path) {
 	checkCudaErrors(cudaMemcpy(Layer8_Weights_GPU,Layer8_Weights_CPU, LAYER8_PARAMS* NUM * sizeof(double), cudaMemcpyHostToDevice));
 	double *Layer8_Features;
 	checkCudaErrors(cudaMalloc((void**) &Layer8_Features, 512*(IMAGE_WIDTH/8)*(IMAGE_WIDTH/8)* NUM * sizeof(double)));
-	
+
 	double *Layer8_Weights_Bias_GPU;
 	checkCudaErrors(cudaMalloc((void**) &Layer8_Weights_Bias_GPU, LAYER8_BIAS_PARAMS* NUM * sizeof(double)));
 	checkCudaErrors(cudaMemcpy(Layer8_Weights_Bias_GPU,Layer8_Weights_Bias_CPU, LAYER8_BIAS_PARAMS* NUM * sizeof(double), cudaMemcpyHostToDevice));
@@ -676,7 +752,7 @@ void NeuralNetwork(char *file_path) {
 	double *Layer9_Weights_Bias_GPU;
 	checkCudaErrors(cudaMalloc((void**) &Layer9_Weights_Bias_GPU, LAYER9_BIAS_PARAMS* NUM * sizeof(double)));
 	checkCudaErrors(cudaMemcpy(Layer9_Weights_Bias_GPU,Layer9_Weights_Bias_CPU, LAYER9_BIAS_PARAMS* NUM * sizeof(double), cudaMemcpyHostToDevice));
-	
+
 	printf("Executing Ninth Layer\n");
 	//Execute Ninth Layer
 	ExecuteConvLayer<<<n3_blocks,n3_threads>>>(Layer9_Weights_GPU, Layer9_Features, Layer8_Features, 512, 512, IMAGE_WIDTH/8,Layer9_Weights_Bias_GPU);
@@ -853,32 +929,32 @@ void NeuralNetwork(char *file_path) {
 	checkCudaErrors(cudaMemcpy(Layer1_Features_CPU, Layer17_Features, 1000*(IMAGE_WIDTH/224)*(IMAGE_WIDTH/224)* NUM * sizeof(double), cudaMemcpyDeviceToHost));
 	checkCudaErrors(cudaPeekAtLastError());
 
-    double maxf[5] = {0};
-    int idxp[5] = {0};
-    for (int j = 0; j < 5; j++) {
-        double max = Layer1_Features_CPU[0];
-        int index = 0;
-        for(int i=0; i<1000*(IMAGE_WIDTH/224)*(IMAGE_WIDTH/224)* NUM; i++){
-            if (max < Layer1_Features_CPU[i]) {
-                max = Layer1_Features_CPU[i];
-                index = i;
-            }
-        }
-        maxf[j] = max;
-        idxp[j] = index;
-        Layer1_Features_CPU[index] = 0;
+	double maxf[5] = {0};
+	int idxp[5] = {0};
+	for (int j = 0; j < 5; j++) {
+		double max = Layer1_Features_CPU[0];
+		int index = 0;
+		for(int i=0; i<1000*(IMAGE_WIDTH/224)*(IMAGE_WIDTH/224)* NUM; i++){
+			if (max < Layer1_Features_CPU[i]) {
+				max = Layer1_Features_CPU[i];
+				index = i;
+			}
+		}
+		maxf[j] = max;
+		idxp[j] = index;
+		Layer1_Features_CPU[index] = 0;
 
-    }
+	}
 
-    char* image_class[1000] = {0};
+	char* image_class[1000] = {0};
 
-    for(int i = 0;i<1000;i++) {
-        image_class[i] = (char*) malloc(125*sizeof(char));
-    }
+	for(int i = 0;i<1000;i++) {
+		image_class[i] = (char*) malloc(125*sizeof(char));
+	}
 
-    LoadImageNetClass(image_class,(char*)"data/imagenet_classes.txt");
+	LoadImageNetClass(image_class,(char*)"data/imagenet_classes.txt");
 
-    for (int i = 0;i<5;i++)
-        printf("\n%.17f at index %d - class %s\n",maxf[i],idxp[i],image_class[idxp[i]]);
+	for (int i = 0;i<5;i++)
+		printf("\n%.17f at index %d - class %s\n",maxf[i],idxp[i],image_class[idxp[i]]);
 #endif
 }
