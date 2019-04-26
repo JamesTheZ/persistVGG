@@ -211,44 +211,53 @@ __global__ void ExecuteFirstLayer(double *Layer1_Weights_CPU, double *Data_Layer
 /////////////////////////////////////////////////////////////////////////////////////////
 // Device function to execute second convolutional layer
 /////////////////////////////////////////////////////////////////////////////////////////
-__global__ void ExecuteConvLayer(double *Layer_Weights_CPU, double *Layer2_Features, double *Layer1_Features, int output_image_depth, int input_image_depth, int image_size,double* bias) {
-	int kernel_depth = input_image_depth;
-	int padding = 1;
-	int mask_width = 3; //kernel width is 3 for all convolution layers in VGGNET
-	double Features = 0;
+__global__ void ExecuteConvLayer(
+		double *filter, double *feature_out, double *feature_in, 
+		int num_filters, int num_channels, int in_dim, double* bias) {
+
+	int out_dim = in_dim;
+
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-	for(int f=0; f<output_image_depth; f++) {
-		Features = 0;
-		for(int n=0; n<input_image_depth; n++) {// Input Image Depth = 64
-			if(x<image_size){
-				if(y<image_size) {
-					double result = 0;
-					for(int i = x-padding; i<=x+padding; i++) {// Padding = 1
-						for(int j=y-padding; j<=y+padding; j++) {
-							int x_index = i-x+padding;
-							int y_index = j-y+padding;
-							int m = (y_index)+(x_index)*mask_width;
-							if(i<0 || j<0) {
-								result+=0;
-							}
-							else if(j>image_size-padding || i>image_size-padding) {
-								result+=0;
-							}
-							else {
-								result+= Layer1_Features[n*image_size*image_size + (x_index+x-padding)*image_size + (y_index+y-padding)]*Layer_Weights_CPU[m+f*mask_width*mask_width*kernel_depth+n*mask_width*mask_width]; //Number of kernels =64
-							}
-						}
-					}
-					Features += result;
+	int gid = x * gridDim.x + y;
+	int row = x; //(gid / gridDim.x) % gridDim.x;
+	int col = y; //gid % gridDim.x;
+
+	if(gid >= out_dim * out_dim)
+	{
+		return;
+	}
+	int filter_dim= 3; //kernel width is 3 for all convolution layers in VGGNET
+
+	int filter_size = filter_dim * filter_dim;
+	int in_size = in_dim * in_dim;
+	int out_size = out_dim * out_dim;
+	int channel_filter_size = num_channels * filter_size;
+	int padding = (filter_dim - 1) / 2;
+
+	double feature = 0;
+
+	for(int filter_id=0; filter_id<num_filters; filter_id++) {
+		feature = bias[filter_id];
+		for(int ch=0; ch<num_channels; ch++) {
+			for(int i = row-padding; 
+					i<=row+padding && i>=0 && i<in_dim; 
+					i++) {// Padding = 1
+				int r = i-row+padding;
+				for(int j=col-padding; 
+						j<=col+padding && j>=0 && j<in_dim; 
+						j++) {
+					int c = j-col+padding;
+					feature+=filter[filter_id*channel_filter_size+
+						ch*filter_size+r*filter_dim+c]
+						* feature_in[ch*in_size+i*in_dim+j];
 				}
 			}
 		}
-		Features += bias[f];
 		//ReLU activation function computation
-		if(Features<0)
-			Features = 0;
-		Layer2_Features[f*image_size*image_size + x*image_size + y] = Features;
+		if(feature<0)
+			feature = 0;
+		feature_out[filter_id*out_size+row*out_dim+col] = feature;
 	}
 }
 
@@ -271,7 +280,8 @@ __global__ void conv(int in_dim, int num_channels,
 	int padding = (filter_dim - 1) / 2;
 
 	int filter_id = gid / out_size;
-	int row = (gid / out_dim) % out_dim;
+	int row = gid % out_size / out_dim;
+	//int row = (gid / out_dim) % out_dim;
 	int col = gid % out_dim;
 
 	double feature = bias[filter_id];
@@ -287,6 +297,13 @@ __global__ void conv(int in_dim, int num_channels,
 			}
 		}
 	}
+
+	//ReLU activation function computation
+	if(feature<0)
+	{
+		feature = 0;
+	}
+
 	feature_out[filter_id * out_size + row * out_dim + col] = feature;
 
 	//int padding = 1;
@@ -588,7 +605,7 @@ void NeuralNetwork(char *file_path) {
 
 	printf("Executing Second Layer\n");
 	//Execute Second Layer
-	
+
 	ExecuteConvLayer<<<n_blocks,n_threads>>>(Layer2_Weights_GPU, Layer2_Features, Layer1_Features, 64, 64, IMAGE_WIDTH,Layer2_Weights_Bias_GPU);
 	checkCudaErrors(cudaDeviceSynchronize());
 
