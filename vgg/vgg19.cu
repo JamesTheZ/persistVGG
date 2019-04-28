@@ -5,79 +5,8 @@
 #include <cuda.h>
 #include <cublas_v2.h>
 
-#include "error_helper.hpp"
+#include "cublasFunction.h"
 
-#define CUDA_CHECK_ERROR
-
-#define CudaSafeCall(err) __CudaSafeCall(err, __FILE__, __LINE__)
-#define CudaCheckError() __CudaCheckError(__FILE__, __LINE__)
-
-__host__ void __CudaSafeCall(cudaError err, const char *file, const int line) {
-#ifdef CUDA_CHECK_ERROR
-    if (cudaSuccess != err) {
-        fprintf(stderr, "cudaSafeCall() failed at %s:%i : %s\n", file, line,
-                cudaGetErrorString(err));
-        exit(-1);
-    }
-#endif
-}
-
-__host__ void __CudaCheckError(const char *file, const int line) {
-#ifdef CUDA_CHECK_ERROR
-    cudaError err = cudaGetLastError();
-    if (cudaSuccess != err) {
-        fprintf(stderr, "cudaCheckError() failed at %s:%i : %s\n", file, line,
-                cudaGetErrorString(err));
-        exit(-1);
-    }
-#endif
-}
-
-// weights & bias size: (filter size * channels + 1 bias) * #filters
-const float conv1_1_w = (3 * 3 * 3    + 1) * 64;
-const float conv1_2_w = (3 * 3 * 64   + 1) * 64;
-const float conv2_1_w = (3 * 3 * 64   + 1) * 128;
-const float conv2_2_w = (3 * 3 * 128  + 1) * 128;
-const float conv3_1_w = (3 * 3 * 128  + 1) * 256;
-const float conv3_2_w = (3 * 3 * 256  + 1) * 256;
-const float conv3_3_w = (3 * 3 * 256  + 1) * 256;
-const float conv3_4_w = (3 * 3 * 256  + 1) * 256;
-const float conv4_1_w = (3 * 3 * 256  + 1) * 512;
-const float conv4_2_w = (3 * 3 * 512  + 1) * 512;
-const float conv4_3_w = (3 * 3 * 512  + 1) * 512;
-const float conv4_4_w = (3 * 3 * 512  + 1) * 512;
-const float conv5_1_w = (3 * 3 * 512  + 1) * 512;
-const float conv5_2_w = (3 * 3 * 512  + 1) * 512;
-const float conv5_3_w = (3 * 3 * 512  + 1) * 512;
-const float conv5_4_w = (3 * 3 * 512  + 1) * 512;
-const float fc1_w     = (7 * 7 * 512  + 1) * 4096;
-const float fc2_w     = (1 * 1 * 4096 + 1) * 4096;
-const float fc3_w     = (1 * 1 * 4096 + 1) * 1000;
-// layer output size
-const float conv1_1  = 224 * 224 * 64;
-const float conv1_2  = 224 * 224 * 64;
-const float maxpool1 = 112 * 112 * 64;
-const float conv2_1  = 112 * 112 * 128;
-const float conv2_2  = 112 * 112 * 128;
-const float maxpool2 = 56  * 56  * 128;
-const float conv3_1  = 56  * 56  * 256;
-const float conv3_2  = 56  * 56  * 256;
-const float conv3_3  = 56  * 56  * 256;
-const float conv3_4  = 56  * 56  * 256;
-const float maxpool3 = 28  * 28  * 256;
-const float conv4_1  = 28  * 28  * 512;
-const float conv4_2  = 28  * 28  * 512;
-const float conv4_3  = 28  * 28  * 512;
-const float conv4_4  = 28  * 28  * 512;
-const float maxpool4 = 14  * 14  * 512;
-const float conv5_1  = 14  * 14  * 512;
-const float conv5_2  = 14  * 14  * 512;
-const float conv5_3  = 14  * 14  * 512;
-const float conv5_4  = 14  * 14  * 512;
-const float maxpool5 = 7   * 7   * 512;
-const float fc1      = 1   * 1   * 4096;
-const float fc2      = 1   * 1   * 4096;
-const float fc3      = 1   * 1   * 1000;
 
 FILE *fw;
 FILE *fb;
@@ -191,29 +120,28 @@ void fully_connected(int width, int channels, int num_filters)
 
     float *d_input;
     size_t input_size = (width * width * channels + 1) * sizeof(float);
-    CudaSafeCall(cudaMalloc(&d_input, input_size));
+    checkCudaErrors(cudaMalloc(&d_input, input_size));
     if (width == 1) {
         // previous output vector (channels * 1), expand to ((channels + 1) * 1) with a 1 at last
         float *output = (float *)malloc((channels + 1) * sizeof(float));
-        CudaSafeCall(cudaMemcpy(output, d_output, channels * sizeof(float), cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(output, d_output, channels * sizeof(float), cudaMemcpyDeviceToHost));
         output[channels] = 1;
-        CudaSafeCall(cudaMemcpy(d_input, output, (channels + 1) * sizeof(float), cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMemcpy(d_input, output, (channels + 1) * sizeof(float), cudaMemcpyHostToDevice));
         free(output);
     }
     else {
         // only the first fc needs to transform previous output to a vector (width * width * channels)
         transform_fc <<< 1, channels >>> (d_input, d_output, width, channels);
-        CudaCheckError();
-        CudaSafeCall(cudaDeviceSynchronize());
+        checkCudaErrors(cudaDeviceSynchronize());
     }
 
     float *d_weights;
-    CudaSafeCall(cudaMalloc(&d_weights, num_weights * sizeof(float)));
+    checkCudaErrors(cudaMalloc(&d_weights, num_weights * sizeof(float)));
     cudaFree(d_output);
-    CudaSafeCall(cudaMalloc(&d_output, num_filters * sizeof(float)));
-    error_check(cublasSetMatrix(hidden_width, num_filters, sizeof(float), weights, hidden_width, d_weights, hidden_width));
+    checkCudaErrors(cudaMalloc(&d_output, num_filters * sizeof(float)));
+    checkCudaErrors(cublasSetMatrix(hidden_width, num_filters, sizeof(float), weights, hidden_width, d_weights, hidden_width));
     // weights * input = (num_filters * (channels + 1)) * ((channels + 1) * 1), consider vector as matrix
-    error_check(cublasSgemm(cubHandle, CUBLAS_OP_N, CUBLAS_OP_N, 1, num_filters, hidden_width,
+    checkCudaErrors(cublasSgemm(cubHandle, CUBLAS_OP_N, CUBLAS_OP_N, 1, num_filters, hidden_width,
                             &alpha, d_input, 1, d_weights, hidden_width,
                             &beta, d_output, 1));
 
@@ -226,13 +154,12 @@ void maxpool(int width, int channels)
 {
     float *d_temp;
     size_t mem_size = width * width * channels * sizeof(float);
-    CudaSafeCall(cudaMalloc(&d_temp, mem_size));
-    CudaSafeCall(cudaMemcpy(d_temp, d_output, mem_size, cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaMalloc(&d_temp, mem_size));
+    checkCudaErrors(cudaMemcpy(d_temp, d_output, mem_size, cudaMemcpyDeviceToDevice));
     cudaFree(d_output);
-    CudaSafeCall(cudaMalloc(&d_output, mem_size / 4));
+    checkCudaErrors(cudaMalloc(&d_output, mem_size / 4));
     maxpooling <<< width / 2, width / 2 >>> (d_output, d_temp, width, channels);
-    CudaCheckError();
-    CudaSafeCall(cudaDeviceSynchronize());
+    checkCudaErrors(cudaDeviceSynchronize());
 }
 
 // 'num_filters' of former layer is 'channels' of latter layer
@@ -252,13 +179,13 @@ void convolution(int width, int channels, int num_filters)
     float *d_raw_input;
     float *d_input;
     size_t input_size = width * width * hidden_width * sizeof(float);
-    CudaSafeCall(cudaMalloc(&d_input, input_size));
-    CudaSafeCall(cudaMemset(d_input, 0, input_size));
+    checkCudaErrors(cudaMalloc(&d_input, input_size));
+    checkCudaErrors(cudaMemset(d_input, 0, input_size));
     // expand original input to (width * width) * (3 * 3 * channels + 1) with a 1 at last for bias
     if (channels == 3) {
         size_t raw_input_size = width * width * channels * sizeof(float);
-        CudaSafeCall(cudaMalloc(&d_raw_input, raw_input_size));
-        CudaSafeCall(cudaMemcpy(d_raw_input, image, raw_input_size, cudaMemcpyHostToDevice));
+        checkCudaErrors(cudaMalloc(&d_raw_input, raw_input_size));
+        checkCudaErrors(cudaMemcpy(d_raw_input, image, raw_input_size, cudaMemcpyHostToDevice));
         transform_image <<< width, width >>> (d_input, d_raw_input, width, channels);
     }
     else 
@@ -266,16 +193,15 @@ void convolution(int width, int channels, int num_filters)
 		// d_output has width*width rows and channels cols.
         transform <<< width, width >>> (d_input, d_output, width, channels);
 	}
-    CudaCheckError();
-    CudaSafeCall(cudaDeviceSynchronize());
+    checkCudaErrors(cudaDeviceSynchronize());
 
     float *d_weights;
-    CudaSafeCall(cudaMalloc(&d_weights, num_weights * sizeof(float)));
+    checkCudaErrors(cudaMalloc(&d_weights, num_weights * sizeof(float)));
     cudaFree(d_output);
-    CudaSafeCall(cudaMalloc(&d_output, output_size * sizeof(float)));
-    error_check(cublasSetMatrix(num_filters, hidden_width, sizeof(float), weights, num_filters, d_weights, num_filters));
+    checkCudaErrors(cudaMalloc(&d_output, output_size * sizeof(float)));
+    checkCudaErrors(cublasSetMatrix(num_filters, hidden_width, sizeof(float), weights, num_filters, d_weights, num_filters));
     // input * weights = ((width * width) * (3 * 3 * channels + 1)) * ((3 * 3 * channels + 1) * num_filters)
-    error_check(cublasSgemm(cubHandle, CUBLAS_OP_N, CUBLAS_OP_N, num_filters, width * width, hidden_width,
+    checkCudaErrors(cublasSgemm(cubHandle, CUBLAS_OP_N, CUBLAS_OP_N, num_filters, width * width, hidden_width,
                             &alpha, d_weights, num_filters, d_input, hidden_width,
                             &beta, d_output, num_filters));
 	// d_output has width*width rows and num_filters cols.
@@ -288,25 +214,25 @@ void convolution(int width, int channels, int num_filters)
 }
 
 // debug use, print out each element of output after a layer
-void debug_print(int width, int channels)
-{
-    int output_size = width * width * channels;
-    float *output = (float *)malloc(output_size * sizeof(float));
-    error_check(cublasGetMatrix(num_filters, width * width, sizeof(float), d_output, num_filters, output, num_filters));
-    for (int i = 0; i < channels; i++) {
-        for (int j = 0; j < width * width; j++)
-            printf("%f ", output[j * channels + i]);
-        printf("\n");
-    }
-    free(output);
-}
+//void debug_print(int width, int channels)
+//{
+//    int output_size = width * width * channels;
+//    float *output = (float *)malloc(output_size * sizeof(float));
+//    checkCudaErrors(cublasGetMatrix(num_filters, width * width, sizeof(float), d_output, num_filters, output, num_filters));
+//    for (int i = 0; i < channels; i++) {
+//        for (int j = 0; j < width * width; j++)
+//            printf("%f ", output[j * channels + i]);
+//        printf("\n");
+//    }
+//    free(output);
+//}
 
 void write_output(char *output_file)
 {
     FILE *fout = fopen(output_file, "w");
 
     float *output = (float *)malloc(1000 * sizeof(float));
-    CudaSafeCall(cudaMemcpy(output, d_output, 1000 * sizeof(float), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(output, d_output, 1000 * sizeof(float), cudaMemcpyDeviceToHost));
 
     for (int i = 0; i < 1000; i++)
         fprintf(fout, "%f\n", output[i]);
@@ -333,13 +259,50 @@ int main(int argc, char **argv)
     char *weights_file = argv[2];
     char *bias_file = argv[3];
     char *output_file = argv[4];
+
+	CNNFunction *func = new CNNCublasFunction();
+
+	func->init();
+	func->readImage(image_file);
+	func->readParameters(weights_file, bias_file);
+
+    // ReLU layers in transform kernel or maxpooling
+    func->convolution(224, 3, 64, 0);
+    func->convolution(224, 64, 64, 1);
+    func->maxpool(224, 64);
+    func->convolution(112, 64, 128, 2);
+    func->convolution(112, 128, 128, 3);
+    func->maxpool(112, 128);
+    func->convolution(56, 128, 256, 4);
+    func->convolution(56, 256, 256, 5);
+    func->convolution(56, 256, 256, 6);
+    func->convolution(56, 256, 256, 7);
+    func->maxpool(56, 256);
+    func->convolution(28, 256, 512, 8);
+    func->convolution(28, 512, 512, 9);
+    func->convolution(28, 512, 512, 10);
+    func->convolution(28, 512, 512, 11);
+    func->maxpool(28, 512);
+    func->convolution(14, 512, 512, 12);
+    func->convolution(14, 512, 512, 13);
+    func->convolution(14, 512, 512, 14);
+    func->convolution(14, 512, 512, 15 );
+    func->maxpool(14, 512);
+    func->fullyConnected(7, 512, 4096, 16); // most time consuming file input
+    func->fullyConnected(1, 4096, 4096, 17);
+    func->fullyConnected(1, 4096, 1000, 18);
+
+    // write 1000 dimension
+    func->writeOutput(output_file);
+
+	/*
     // read image file
     read_image(image_file);
 
     // initialize
     fw = fopen(weights_file, "r");
     fb = fopen(bias_file, "r");
-    error_check(cublasCreate(&cubHandle));
+    checkCudaErrors(cublasCreate(&cubHandle));
 
     // ReLU layers in transform kernel or maxpooling
     // read file input in each layer beginning to save memory cost
@@ -373,7 +336,8 @@ int main(int argc, char **argv)
 
     fclose(fw);
     fclose(fb);
-    error_check(cublasDestroy(cubHandle));
+    checkCudaErrors(cublasDestroy(cubHandle));
+	*/
 
     return 0;
 }

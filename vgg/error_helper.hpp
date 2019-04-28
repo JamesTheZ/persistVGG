@@ -6,6 +6,8 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cusparse.h>
+#include <string>
+#include <iostream>
 
 namespace zex
 {

@@ -1,0 +1,5 @@
+927: 0.971594286166 n07590611 hot pot, hotpot
+941: 0.0284057138338 n07716906 spaghetti squash
+161: 3.19886946477e-26 n02088094 Afghan hound, Afghan
+950: 8.03244239998e-28 n07745940 strawberry
+71: 5.91905676569e-33 n01770081 harvestman, daddy longlegs, Phalangium opilio
