@@ -57,21 +57,18 @@ void CNNFunction::readParameters(char *weightsFile, char *biasFile)
 		exit(1);
 	}
 
-	printf("reach line %d in file %s\n", __LINE__, __FILE__);
-
 	// init weights & bias. row major
-	// fused paramters, colum major
+	// fused paramters, colum major for conv layers, row major for fc layer
 	int maxWeightSize = 7 * 7 * 512 * 4096;
 	float *hWeights = (float*)malloc(maxWeightSize*sizeof(float));
 	float *hParameters = (float*)malloc((maxWeightSize+4096)*sizeof(float));
 	float *hBias= (float*)malloc(4096*sizeof(float));
-	if(hWeights == NULL || hBias == NULL)
+	if(hWeights == NULL || hParameters == NULL || hBias == NULL)
 	{
 		printf("fail to malloc for weights or bias\n");
 		exit(1);
 	}
-	printf("reach line %d in file %s\n", __LINE__, __FILE__);
-	for(int i=0; i<19; i++)
+	for(int i=0; i<16; i++)
 	{
 		int hiddenSize = filterSize[i] * channels[i];
 		int weightSize = hiddenSize * numFilters[i];
@@ -95,20 +92,38 @@ void CNNFunction::readParameters(char *weightsFile, char *biasFile)
 					parameterSize*sizeof(float), cudaMemcpyDefault));
 		checkCudaErrors(cudaMemcpy(bias[i], hBias, 
 					biasSize*sizeof(float), cudaMemcpyDefault));
-		printf("iter: %d\n", i);
-		fflush(NULL);
-		
 	}
-	printf("reach line %d in file %s\n", __LINE__, __FILE__);
+	for(int i=16; i<19; i++)
+	{
+		int hiddenSize = filterSize[i] * channels[i];
+		int weightSize = hiddenSize * numFilters[i];
+		int biasSize = numFilters[i];
+		int parameterSize = weightSize + biasSize;
+		for (int nf = 0; nf < numFilters[i]; nf++) 
+		{
+			for (int hs = 0; hs < hiddenSize; hs++)
+			{
+				fscanf(fw, "%f", &hWeights[nf * hiddenSize + hs]);
+				hParameters[nf * (hiddenSize + 1) + hs] 
+					= hWeights[nf * hiddenSize + hs];
+			}
+			fscanf(fb, "%f", &hBias[nf]);
+			hParameters[nf * (hiddenSize + 1) + hiddenSize] = hBias[nf];
+		}
+		checkCudaErrors(cudaMemcpy(weights[i], hWeights, 
+					weightSize*sizeof(float), cudaMemcpyDefault));
+		checkCudaErrors(cudaMemcpy(parameters[i], hParameters, 
+					parameterSize*sizeof(float), cudaMemcpyDefault));
+		checkCudaErrors(cudaMemcpy(bias[i], hBias, 
+					biasSize*sizeof(float), cudaMemcpyDefault));
+	}
 	checkCudaErrors(cudaDeviceSynchronize());
 	free(hWeights);
 	free(hParameters);
 	free(hBias);
-	printf("reach line %d in file %s\n", __LINE__, __FILE__);
 
 	fclose(fw);
 	fclose(fb);
-	printf("reach line %d in file %s\n", __LINE__, __FILE__);
 }
 
 void CNNFunction::writeOutput(char *output_file)
