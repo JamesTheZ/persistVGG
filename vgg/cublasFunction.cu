@@ -27,6 +27,7 @@ void CNNCublasFunction::fullyConnected(int width, int channels, int num_filters,
 		transformFCCublas<<< 1, channels >>>(d_input, featureOut, width, channels);
 	}
 
+	// featureOut will be in NCHW format
 	checkCudaErrors(cublasSgemm(cubHandle, CUBLAS_OP_N, 
 				CUBLAS_OP_N, 1, num_filters, filter_size+1,
 				&alpha, d_input, 1, d_weights, filter_size+1,
@@ -66,7 +67,7 @@ void CNNCublasFunction::convolution(int width, int channels, int num_filters, in
 	}
 	else
 	{
-		// d_output has width*width rows and channels cols.
+		// featureOut is in NHWC format, width*width rows and channels cols.
         transformCublas <<< width, width >>> (d_input, featureOut, width, channels);
 	}
 
@@ -128,6 +129,7 @@ __global__ void transformFCCublas(float *input, const float *raw_input, const in
 	}
 }
 
+// raw_input is in NHWC format
 __global__ void transformCublas(float *input, const float *raw_input, const int width, const int channels)
 {
 	int thread_id = blockDim.x * blockIdx.x + threadIdx.x;

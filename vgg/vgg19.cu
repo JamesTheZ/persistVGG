@@ -5,7 +5,7 @@
 #include <cuda.h>
 #include <cublas_v2.h>
 
-#include "cublasFunction.h"
+#include "cudnnFunction.h"
 
 int main(int argc, char **argv)
 {
@@ -14,7 +14,7 @@ int main(int argc, char **argv)
     char *bias_file = argv[3];
     char *output_file = argv[4];
 
-	CNNFunction *func = new CNNCublasFunction();
+	CNNFunction *func = new CNNCudnnFunction();
 
 	func->init();
 	func->readImage(image_file);

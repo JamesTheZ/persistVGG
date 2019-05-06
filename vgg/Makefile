@@ -2,13 +2,13 @@ CC = g++
 NVCC = nvcc
 NVFLAGS = -O0 -std=c++11 -I. -I./inc -g -G #-arch=sm_30
 CXXFLAGS = -O0 -Wunused-result
-LDFLAGS = -lm -lcublas -lcusparse
+LDFLAGS = -lm -lcublas -lcusparse -lcudnn
 TARGETS = vgg19 
 
 all: $(TARGETS)
 
-vgg19: vgg19.cu cublasFunction.cu function.cu
-	$(NVCC) $(NVFLAGS) -Xcompiler="$(CXXFLAGS)" $(LDFLAGS) -o $@ vgg19.cu cublasFunction.cu function.cu
+vgg19: vgg19.cu cudnnFunction.cu cublasFunction.cu function.cu
+	$(NVCC) $(NVFLAGS) -Xcompiler="$(CXXFLAGS)" $(LDFLAGS) -o $@ vgg19.cu cudnnFunction.cu cublasFunction.cu function.cu
 
 %: %.cpp
 	$(CC) $(CXXFLAGS) $(LDFLAGS) -o $@ $?

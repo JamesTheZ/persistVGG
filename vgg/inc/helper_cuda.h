@@ -88,6 +88,12 @@ static const char *_cudaGetErrorEnum(cublasStatus_t error) {
 }
 #endif
 
+#ifdef CUDNN_H_
+static const char *_cudaGetErrorEnum(cudnnStatus_t error) {
+    return cudnnGetErrorString(error);
+}
+#endif
+
 #ifdef _CUFFT_H_
 // cuFFT API errors
 static const char *_cudaGetErrorEnum(cufftResult error) {
