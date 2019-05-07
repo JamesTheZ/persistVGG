@@ -8,7 +8,7 @@ void CNNCublasFunction::init()
 
 void CNNCublasFunction::fullyConnected(int width, int channels, int num_filters, int layerId)
 {
-	int num_weights = (width * width * channels + 1) * num_filters;
+	//int num_weights = (width * width * channels + 1) * num_filters;
 	int filter_size = width * width * channels;
 	float *d_weights = parameters[layerId];
 
@@ -48,12 +48,12 @@ void CNNCublasFunction::maxpool(int width, int channels)
 
 void CNNCublasFunction::convolution(int width, int channels, int num_filters, int layerId)
 {
-    int num_weights = (3 * 3 * channels + 1) * num_filters;
-    int output_size = width * width * num_filters;
-    int filter_size = 3 * 3 * channels;
+    //int num_weights = (3 * 3 * channels + 1) * num_filters;
+    //int output_size = width * width * num_filters;
+    //int filter_size = 3 * 3 * channels;
     int hidden_width = 3 * 3 * channels + 1;
 
-    float *d_raw_input;
+    //float *d_raw_input;
     float *d_input;
     size_t input_size = width * width * hidden_width * sizeof(float);
     checkCudaErrors(cudaMalloc(&d_input, input_size));
@@ -94,21 +94,20 @@ __global__ void transformImageCublas(float *input, const float *raw_input, const
 	for (int c = 0; c < channels; c++) {
 		int offset = 0;
 		for (int i = start_i; i < start_i + 3; i++) {
-			if (i < 0 || i == width)
-				continue;
 			for (int j = start_j; j < start_j + 3; j++) {
-				if (j < 0 || j == width)
-					continue;
-				input[global_offset + c * 9 + offset] 
-					= raw_input[c * per_channel_width + i * width + j];
+				// zero padding
+				if(i < 0 || i == width || j < 0 || j == width)
+				{
+					input[global_offset + c * 9 + offset] = 0;
+				}
+				else
+				{
+					input[global_offset + c * 9 + offset] 
+						= raw_input[c * per_channel_width + i * width + j];
+				}
 				offset++;
 			}
 		}
-		// padding ?? added by Zhen
-		// while(offset < 9)
-		// {
-		// 	input[offset++] = 0;
-		// }
 	}
 	input[(thread_id + 1) * hidden_width - 1] = 1;
 }
@@ -142,21 +141,20 @@ __global__ void transformCublas(float *input, const float *raw_input, const int 
 	for (int c = 0; c < channels; c++) {
 		int offset = 0;
 		for (int i = start_i; i < start_i + 3; i++) {
-			if (i < 0 || i == width)
-				continue;
 			for (int j = start_j; j < start_j + 3; j++) {
-				if (j < 0 || j == width)
-					continue;
-				relu = raw_input[(i * width + j) * channels + c];
+				// zero padding
+				if(i < 0 || i == width || j < 0 || j == width)
+				{
+					relu = 0;
+				}
+				else
+				{
+					relu = raw_input[(i * width + j) * channels + c];
+				}
 				input[global_offset + c * 9 + offset] = relu < 0 ? 0 : relu;
 				offset++;
 			}
 		}
-		// padding, is this correct ?? added by Zhen
-		// while(offset < 9)
-		// {
-		// 	input[offset++] = 0;
-		// }
 	}
 	input[(thread_id + 1) * hidden_width - 1] = 1;
 }

@@ -16,6 +16,15 @@ void CNNFunction::readImage(char *imageFile)
 		image[index] -= mean_pixel[index / 50176]; // 50176 = 224 * 224
 	}
 	fclose(fin);
+
+	if(featureOut == nullptr)
+	{
+		printf("featureOut is not malloced. exit.\n");
+		fflush(NULL);
+		exit(1);
+	}
+
+	checkCudaErrors(cudaMemcpy(featureOut, image, 224 * 224 * 3 * sizeof(float), cudaMemcpyDefault));
 }
 
 void CNNFunction::init()
@@ -83,6 +92,7 @@ void CNNFunction::readParameters(char *weightsFile, char *biasFile)
 					= hWeights[nf * hiddenSize + hs];
 			}
 			fscanf(fb, "%f", &hBias[nf]);
+			hBias[nf] = 0; // for debugging
 			hParameters[hiddenSize * numFilters[i] + nf] = hBias[nf];
 		}
 		//printf("%p, %p, %d\n", weights[i], hWeights, weightSize*sizeof(float));

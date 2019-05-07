@@ -122,7 +122,7 @@ class CNNFunction
 {
 	public:
 		float image[224 * 224 * 3];
-		float *featureOut;
+		float *featureOut = nullptr;
 		float *weights[19];
 		float *bias[19];
 		float *parameters[19]; // fuse weights and bias together

@@ -5,11 +5,6 @@
 #include "cublas_v2.h"
 #include "function.h"
 
-__global__ void transformImageCudnn(float *input, const float *raw_input, const int width, const int channels);
-__global__ void transformFCCudnn(float *input, const float *raw_input, const int width, const int channels);
-__global__ void transformCudnn(float *input, const float *raw_input, const int width, const int channels);
-__global__ void maxpoolingCudnn(float *output, const float *input, const int width, const int channels);
-
 class CNNCudnnFunction : public CNNFunction
 {
 	private:

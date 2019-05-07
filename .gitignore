@@ -3,3 +3,4 @@ naive_vgg/data
 naive_vgg/model
 vgg/imagenet-vgg-verydeep-19.mat
 vgg/vgg19_weight
+vgg/vgg19

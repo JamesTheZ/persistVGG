@@ -1,5 +1,5 @@
-150: 0.178723483484 n02074367 dugong, Dugong dugon
-5: 0.0534654593848 n01494475 hammerhead, hammerhead shark
-526: 0.0495010472752 n03160309 dam, dike, dyke
-4: 0.0389436537746 n01491361 tiger shark, Galeocerdo cuvieri
-728: 0.0331323393956 n03956157 planetarium
+877: 0.0131314094623 n04493381 tub, vat
+922: 0.0129007058802 n07248320 book jacket, dust cover, dust jacket, dust wrapper
+869: 0.010018967328 n04476259 tray
+413: 0.00969641305778 n02747177 ashcan, trash can, garbage can, wastebin, ash bin, ash-bin, ashbin, dustbin, trash barrel, trash bin
+607: 0.00860940344086 n03584829 iron, smoothing iron

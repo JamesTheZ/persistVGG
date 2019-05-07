@@ -24,3 +24,6 @@ softmax: softmax.py
 
 clean:
 	rm -rf $(TARGETS)
+
+run: vgg19
+	./vgg19 image/cat1.txt vgg19_weight/vgg19_weight.txt vgg19_weight/vgg19_bias.txt vgg19_output_1000.txt
