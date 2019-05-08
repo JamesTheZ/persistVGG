@@ -92,7 +92,7 @@ void CNNFunction::readParameters(char *weightsFile, char *biasFile)
 					= hWeights[nf * hiddenSize + hs];
 			}
 			fscanf(fb, "%f", &hBias[nf]);
-			hBias[nf] = 0; // for debugging
+			// hBias[nf] = 0; // for debugging
 			hParameters[hiddenSize * numFilters[i] + nf] = hBias[nf];
 		}
 		//printf("%p, %p, %d\n", weights[i], hWeights, weightSize*sizeof(float));

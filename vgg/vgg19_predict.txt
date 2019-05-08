@@ -1,5 +1,5 @@
-877: 0.0131314094623 n04493381 tub, vat
-922: 0.0129007058802 n07248320 book jacket, dust cover, dust jacket, dust wrapper
-869: 0.010018967328 n04476259 tray
-413: 0.00969641305778 n02747177 ashcan, trash can, garbage can, wastebin, ash bin, ash-bin, ashbin, dustbin, trash barrel, trash bin
-607: 0.00860940344086 n03584829 iron, smoothing iron
+282: 0.432860108519 n02123045 tabby, tabby cat
+283: 0.2012189464 n02123159 tiger cat
+286: 0.193145270138 n02124075 Egyptian cat
+284: 0.142678607492 n02123394 Persian cat
+288: 0.0265054030473 n02127052 lynx, catamount

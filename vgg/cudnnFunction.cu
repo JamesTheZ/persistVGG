@@ -10,8 +10,6 @@ void printDArray(float *dArray, int size)
 	{
 		printf("%f\n", hArray[i]);
 	}
-
-
 	fflush(NULL);
 }
 
@@ -51,7 +49,6 @@ void CNNCudnnFunction::fullyConnected(int width, int numChannels, int numFilters
 	checkCudaErrors(cudaMalloc(&featureIn, filterSize * sizeof(float)));
 	checkCudaErrors(cudaMemcpy(featureIn, featureOut, filterSize * sizeof(float), cudaMemcpyDefault));
 
-	// output = filter * featureMap
 	// CUBLAS is column major, which needs extra transform
 	checkCudaErrors(cublasSgemm(cublasHandle, CUBLAS_OP_T, CUBLAS_OP_N,
 				numFilters, 1, filterSize, &alpha, weights[layerId], filterSize, 
@@ -66,35 +63,13 @@ void CNNCudnnFunction::fullyConnected(int width, int numChannels, int numFilters
 				&alpha, cudnnBiasDesc, bias[layerId], 
 				&alpha, cudnnODesc, featureOut));
 
+	// activation
+	checkCudaErrors(cudnnActivationForward(cudnnHandle, cudnnActDesc, 
+				&alpha, cudnnODesc, featureOut, &beta, cudnnODesc, featureOut));
+
 	checkCudaErrors(cudaDeviceSynchronize());
 
 	checkCudaErrors(cudaFree(featureIn));
-
-	//int num_weights = (width * width * numChannels + 1) * numFilters;
-	//int filter_size = width * width * numChannels;
-	//float *d_weights = parameters[layerId];
-
-	//float *d_input;
-    //size_t input_size = (width * width * numChannels + 1) * sizeof(float);
-    //checkCudaErrors(cudaMalloc(&d_input, input_size));
-
-	//if(width == 1)
-	//{
-	//	checkCudaErrors(cudaMemcpy(d_input, featureOut, numChannels*sizeof(float), cudaMemcpyDefault));
-	//	float val = 1.0f;
-	//	checkCudaErrors(cudaMemcpy(d_input + numChannels, &val, sizeof(float), cudaMemcpyDefault));
-	//}
-	//else
-	//{
-	//	transformFCCudnn<<< 1, numChannels >>>(d_input, featureOut, width, numChannels);
-	//}
-
-	//checkCudaErrors(cudnnSgemm(cubHandle, CUDNN_OP_N, 
-	//			CUDNN_OP_N, 1, numFilters, filter_size+1,
-	//			&alpha, d_input, 1, d_weights, filter_size+1,
-	//			&beta, featureOut, 1));
-
-	//checkCudaErrors(cudaFree(d_input));
 }
 
 void CNNCudnnFunction::maxpool(int width, int numChannels)
@@ -109,20 +84,13 @@ void CNNCudnnFunction::maxpool(int width, int numChannels)
 	float* featureIn = nullptr;
 	int featureSize = width * width * numChannels;
 	checkCudaErrors(cudaMalloc(&featureIn, featureSize * sizeof(float)));
-	checkCudaErrors(cudaMemcpy(featureIn, featureOut, featureSize, cudaMemcpyDefault));
+	checkCudaErrors(cudaMemcpy(featureIn, featureOut, featureSize * sizeof(float), cudaMemcpyDefault));
 
 	checkCudaErrors(cudnnPoolingForward(cudnnHandle, cudnnPoolDesc,
 				&alpha, cudnnIDesc, featureIn, &beta, cudnnODesc, featureOut));
 
 	checkCudaErrors(cudaDeviceSynchronize());
 	checkCudaErrors(cudaFree(featureIn));
-	
-    //float *d_temp;
-    //size_t mem_size = width * width * numChannels * sizeof(float);
-    //checkCudaErrors(cudaMalloc(&d_temp, mem_size));
-    //checkCudaErrors(cudaMemcpy(d_temp, featureOut, mem_size, cudaMemcpyDefault));
-    //maxpoolingCudnn <<< width / 2, width / 2 >>> (featureOut, d_temp, width, numChannels);
-    //cudaFree(d_temp);
 }
 
 void CNNCudnnFunction::convolution(int width, int numChannels, int numFilters, int layerId)
@@ -156,23 +124,9 @@ void CNNCudnnFunction::convolution(int width, int numChannels, int numFilters, i
 	std::size_t inputSize = width * width * numChannels * sizeof(float);
 	float* dInput= nullptr;
     checkCudaErrors(cudaMalloc(&dInput, inputSize));
-
-	// memcpy and activation: relu
-	if(layerId != 0)
-	{
-		checkCudaErrors(cudnnActivationForward(cudnnHandle, cudnnActDesc, 
-					&alpha, cudnnIDesc, featureOut, &beta, cudnnIDesc, dInput));
-	}
-	else
-	{
-		checkCudaErrors(cudaMemcpy(dInput, featureOut, inputSize, cudaMemcpyDefault));
-	}
+	checkCudaErrors(cudaMemcpy(dInput, featureOut, inputSize, cudaMemcpyDefault));
 
     float *dFilter = weights[layerId];
-
-	//printDArray(dInput, width * width * numChannels);
-
-	//exit(0);
 
 	checkCudaErrors(cudnnConvolutionForward(cudnnHandle,
 				&alpha, cudnnIDesc, dInput, cudnnFDesc, dFilter, 
@@ -186,46 +140,13 @@ void CNNCudnnFunction::convolution(int width, int numChannels, int numFilters, i
 				&alpha, cudnnBiasDesc, bias[layerId], 
 				&alpha, cudnnODesc, featureOut));
 
+	// activation
+	checkCudaErrors(cudnnActivationForward(cudnnHandle, cudnnActDesc, 
+				&alpha, cudnnODesc, featureOut, &beta, cudnnODesc, featureOut));
+
 	checkCudaErrors(cudaDeviceSynchronize());
 
 	checkCudaErrors(cudaFree(dInput));
 	checkCudaErrors(cudaFree(dWorkspace));
-
-	//checkCudaErrors(cudnnCreateTensorDescriptor(&cudnnIDesc));
-	//checkCudaErrors(cudnnCreateFilterDescriptor(&cudnnFDesc));
-	//checkCudaErrors(cudnnCreateTensorDescriptor(&cudnnODesc));
-
-    //int num_weights = (3 * 3 * numChannels + 1) * numFilters;
-    //int output_size = width * width * numFilters;
-    //int filter_size = 3 * 3 * numChannels;
-    //int hidden_width = 3 * 3 * numChannels + 1;
-
-    //float *d_raw_input;
-    //float *d_input;
-    //size_t input_size = width * width * hidden_width * sizeof(float);
-    //checkCudaErrors(cudaMalloc(&d_input, input_size));
-    //checkCudaErrors(cudaMemset(d_input, 0, input_size));
-    //// expand original input to (width * width) * (3 * 3 * numChannels + 1) with a 1 at last for bias
-    //if (numChannels == 3) 
-	//{
-	//	size_t raw_input_size = width * width * numChannels * sizeof(float);
-    //    checkCudaErrors(cudaMemcpy(featureOut, image, raw_input_size, cudaMemcpyHostToDevice));
-    //    transformImageCudnn <<< width, width >>> (d_input, featureOut, width, numChannels);
-	//}
-	//else
-	//{
-	//	// d_output has width*width rows and numChannels cols.
-    //    transformCudnn <<< width, width >>> (d_input, featureOut, width, numChannels);
-	//}
-
-    //float *d_weights = parameters[layerId];
-    //// input * weights = ((width * width) * (3 * 3 * numChannels + 1)) * ((3 * 3 * numChannels + 1) * numFilters)
-    //checkCudaErrors(cudnnSgemm(cubHandle, CUDNN_OP_N, CUBLAS_OP_N, 
-	//			numFilters, width * width, hidden_width,
-    //            &alpha, d_weights, numFilters, d_input, hidden_width,
-    //            &beta, featureOut, numFilters));
-	//// d_output has width*width rows and numFilters cols.
-	//
-	//checkCudaErrors(cudaFree(d_input));
 }
 

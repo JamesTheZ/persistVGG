@@ -168,7 +168,7 @@ __global__ void maxpoolingCublas(float *output, const float *input, const int wi
 	int index = i * width + j;
 
 	for (int c = 0; c < channels; c++) {
-		float max = 0;
+		float max = 0; // this is a relu
 		if (max < input[index * channels + c])
 			max = input[index * channels + c];
 		if (max < input[(index + 1) * channels + c])
