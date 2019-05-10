@@ -150,19 +150,19 @@ void CNNFunction::writeOutput(char *output_file)
 	fclose(fout);
 }
 
-void CNNFunction::fullyConnected(int width, int channels, int num_filters, int layerId)
+void CNNFunction::fullyConnected(int width, int nChannels, int nFilters, int layerId)
 {
 	printf("Error. Not defined\n");
 	exit(1);
 }
 
-void CNNFunction::maxpool(int width, int channels)
+void CNNFunction::maxpool(int width, int nChannels)
 {
 	printf("Error. Not defined\n");
 	exit(1);
 }
 
-void CNNFunction::convolution(int width, int channels, int num_filters, int layerId)
+void CNNFunction::convolution(int width, int nChannels, int nFilters, int layerId)
 {
 	printf("Error. Not defined\n");
 	exit(1);

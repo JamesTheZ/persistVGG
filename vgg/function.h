@@ -3,7 +3,7 @@
 
 #include "helper_cuda.h"
 
-// weights & bias size: (filter size * channels + 1 bias) * #filters
+// weights & bias size: (filter size * nChannels + 1 bias) * #filters
 const int conv1_1_w = (3 * 3 * 3    + 1) * 64;
 const int conv1_2_w = (3 * 3 * 64   + 1) * 64;
 const int conv2_1_w = (3 * 3 * 64   + 1) * 128;
@@ -134,9 +134,9 @@ class CNNFunction
 		virtual void readParameters(char *weightsFile, char *biasFile);
 		virtual void writeOutput(char *output_file);
 
-		virtual void convolution(int width, int channels, int num_filters, int layerId);
-		virtual void fullyConnected(int width, int channels, int num_filters, int layerId);
-		virtual void maxpool(int width, int channels);
+		virtual void convolution(int width, int nChannels, int nFilters, int layerId);
+		virtual void fullyConnected(int width, int nChannels, int nFilters, int layerId);
+		virtual void maxpool(int width, int nChannels);
 };
 
 #endif

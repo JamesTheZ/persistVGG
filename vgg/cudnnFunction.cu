@@ -42,23 +42,23 @@ void CNNCudnnFunction::init()
 				poolDim, windowDim, padding, stride));
 }
 
-void CNNCudnnFunction::fullyConnected(int width, int numChannels, int numFilters, int layerId)
+void CNNCudnnFunction::fullyConnected(int width, int nChannels, int nFilters, int layerId)
 {
-	int filterSize = width * width * numChannels;
+	int filterSize = width * width * nChannels;
 	float *featureIn = nullptr;
 	checkCudaErrors(cudaMalloc(&featureIn, filterSize * sizeof(float)));
 	checkCudaErrors(cudaMemcpy(featureIn, featureOut, filterSize * sizeof(float), cudaMemcpyDefault));
 
 	// CUBLAS is column major, which needs extra transform
 	checkCudaErrors(cublasSgemm(cublasHandle, CUBLAS_OP_T, CUBLAS_OP_N,
-				numFilters, 1, filterSize, &alpha, weights[layerId], filterSize, 
+				nFilters, 1, filterSize, &alpha, weights[layerId], filterSize, 
 				featureIn, filterSize, &beta, featureOut, filterSize));
 
 	// add bias
 	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnODesc,
-				CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, numFilters, 1, 1));
+				CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, nFilters, 1, 1));
 	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnBiasDesc,
-				CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, numFilters, 1, 1));
+				CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, nFilters, 1, 1));
 	checkCudaErrors(cudnnAddTensor(cudnnHandle, 
 				&alpha, cudnnBiasDesc, bias[layerId], 
 				&alpha, cudnnODesc, featureOut));
@@ -67,43 +67,40 @@ void CNNCudnnFunction::fullyConnected(int width, int numChannels, int numFilters
 	checkCudaErrors(cudnnActivationForward(cudnnHandle, cudnnActDesc, 
 				&alpha, cudnnODesc, featureOut, &beta, cudnnODesc, featureOut));
 
-	checkCudaErrors(cudaDeviceSynchronize());
-
 	checkCudaErrors(cudaFree(featureIn));
 }
 
-void CNNCudnnFunction::maxpool(int width, int numChannels)
+void CNNCudnnFunction::maxpool(int width, int nChannels)
 {
 	cudnnTensorFormat_t format = CUDNN_TENSOR_NCHW;
 	cudnnDataType_t type = CUDNN_DATA_FLOAT;
 	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnIDesc,
-				format, type, 1, numChannels, width, width));
+				format, type, 1, nChannels, width, width));
 	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnODesc,
-				format, type, 1, numChannels, width / 2, width / 2));
+				format, type, 1, nChannels, width / 2, width / 2));
 
 	float* featureIn = nullptr;
-	int featureSize = width * width * numChannels;
+	int featureSize = width * width * nChannels;
 	checkCudaErrors(cudaMalloc(&featureIn, featureSize * sizeof(float)));
 	checkCudaErrors(cudaMemcpy(featureIn, featureOut, featureSize * sizeof(float), cudaMemcpyDefault));
 
 	checkCudaErrors(cudnnPoolingForward(cudnnHandle, cudnnPoolDesc,
 				&alpha, cudnnIDesc, featureIn, &beta, cudnnODesc, featureOut));
 
-	checkCudaErrors(cudaDeviceSynchronize());
 	checkCudaErrors(cudaFree(featureIn));
 }
 
-void CNNCudnnFunction::convolution(int width, int numChannels, int numFilters, int layerId)
+void CNNCudnnFunction::convolution(int width, int nChannels, int nFilters, int layerId)
 {
 	cudnnDataType_t type = CUDNN_DATA_FLOAT;
 	cudnnTensorFormat_t format = CUDNN_TENSOR_NCHW;
 
 	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnIDesc,
-				format, type, 1, numChannels, width, width));
+				format, type, 1, nChannels, width, width));
 	checkCudaErrors(cudnnSetFilter4dDescriptor(cudnnFDesc,
-				type, format, numFilters, numChannels, 3, 3));
+				type, format, nFilters, nChannels, 3, 3));
 	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnODesc,
-				format, type, 1, numFilters, width, width));
+				format, type, 1, nFilters, width, width));
 
 	checkCudaErrors(cudnnSetConvolution2dDescriptor(cudnnConvDesc,
 				1, 1, 1, 1, 1, 1, CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
@@ -121,7 +118,7 @@ void CNNCudnnFunction::convolution(int width, int numChannels, int numFilters, i
 	float* dWorkspace = nullptr;
 	checkCudaErrors(cudaMalloc(&dWorkspace, workspaceSize));
 
-	std::size_t inputSize = width * width * numChannels * sizeof(float);
+	std::size_t inputSize = width * width * nChannels * sizeof(float);
 	float* dInput= nullptr;
     checkCudaErrors(cudaMalloc(&dInput, inputSize));
 	checkCudaErrors(cudaMemcpy(dInput, featureOut, inputSize, cudaMemcpyDefault));
@@ -135,7 +132,7 @@ void CNNCudnnFunction::convolution(int width, int numChannels, int numFilters, i
 	
 	// add bias
 	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnBiasDesc,
-				format, type, 1, numFilters, 1, 1));
+				format, type, 1, nFilters, 1, 1));
 	checkCudaErrors(cudnnAddTensor(cudnnHandle, 
 				&alpha, cudnnBiasDesc, bias[layerId], 
 				&alpha, cudnnODesc, featureOut));
@@ -143,8 +140,6 @@ void CNNCudnnFunction::convolution(int width, int numChannels, int numFilters, i
 	// activation
 	checkCudaErrors(cudnnActivationForward(cudnnHandle, cudnnActDesc, 
 				&alpha, cudnnODesc, featureOut, &beta, cudnnODesc, featureOut));
-
-	checkCudaErrors(cudaDeviceSynchronize());
 
 	checkCudaErrors(cudaFree(dInput));
 	checkCudaErrors(cudaFree(dWorkspace));

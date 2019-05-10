@@ -7,8 +7,8 @@ TARGETS = vgg19
 
 all: $(TARGETS)
 
-vgg19: vgg19.cu cudnnFunction.cu cublasFunction.cu function.cu
-	$(NVCC) $(NVFLAGS) -Xcompiler="$(CXXFLAGS)" $(LDFLAGS) -o $@ vgg19.cu cudnnFunction.cu cublasFunction.cu function.cu
+vgg19: vgg19.cu cudaFunction.cu cudnnFunction.cu cublasFunction.cu function.cu
+	$(NVCC) $(NVFLAGS) -Xcompiler="$(CXXFLAGS)" $(LDFLAGS) -o $@ vgg19.cu cudnnFunction.cu cublasFunction.cu cudaFunction.cu function.cu
 
 %: %.cpp
 	$(CC) $(CXXFLAGS) $(LDFLAGS) -o $@ $?

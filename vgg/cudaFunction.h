@@ -1,11 +1,11 @@
-#ifndef CNN_CUDNN_FUNCTION_H
-#define CNN_CUDNN_FUNCTION_H
+#ifndef CNN_CUDA_FUNCTION_H
+#define CNN_CUDA_FUNCTION_H
 
 #include "cudnn.h"
 #include "cublas_v2.h"
 #include "function.h"
 
-class CNNCudnnFunction : public CNNFunction
+class CNNCudaFunction : public CNNFunction
 {
 	private:
 		cudnnHandle_t cudnnHandle;
@@ -17,6 +17,7 @@ class CNNCudnnFunction : public CNNFunction
 		cudnnConvolutionDescriptor_t cudnnConvDesc;
 		cudnnActivationDescriptor_t cudnnActDesc;
 		cudnnPoolingDescriptor_t cudnnPoolDesc;
+
 		const float alpha = 1.0f;
 		const float beta = 0.0f;
 
@@ -25,6 +26,9 @@ class CNNCudnnFunction : public CNNFunction
 		virtual void convolution(int width, int nChannels, int nFilters, int layerId) override;
 		virtual void fullyConnected(int width, int nChannels, int nFilters, int layerId) override;
 		virtual void maxpool(int width, int nChannels) override;
+
+	private:
+		void relu(float* dArray, int size);
 
 };
 
