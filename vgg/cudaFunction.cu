@@ -54,6 +54,112 @@ __global__ void convBias(float* fIn, float* filter,
 	fOut[filterId * width * width + row * width + col] = sum;
 }
 
+// nChannels % TILE_DEPTH should be 0 !
+// width % BLOCK_WIDTH and width % BLOCK_HEIGHT should be 0 !
+	template <int TILE_DEPTH, int BLOCK_WIDTH, int BLOCK_HEIGHT>
+__global__ void convBiasShared(float* fIn, float* filter, 
+		const int nFilters, const int nChannels, const int width, 
+		float* bias, float* fOut)
+{
+	int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	if(tid >= nFilters * width * width)
+	{
+		return;
+	}
+
+	int const TILE_WIDTH = BLOCK_WIDTH + 2;
+	int const TILE_HEIGHT = BLOCK_HEIGHT + 2;
+	__shared__ float sFilter[TILE_DEPTH * 3 * 3];
+	__shared__ float sFeature[TILE_DEPTH * TILE_WIDTH * TILE_HEIGHT];
+
+	int filterId = tid / (width * width);
+	int row = (tid / width) % width;
+	int col = tid % width;
+
+	int blockR = row % BLOCK_HEIGHT;
+	int blockC = col % BLOCK_WIDTH;
+
+	float sum = bias[filterId];
+	int split = nChannels / TILE_DEPTH;
+	for(int sp = 0; sp < split; sp++)
+	{
+		// init shared memory variables
+		for(int subCh = 0; subCh < TILE_DEPTH; subCh++)
+		{
+			int ch = subCh + sp * TILE_DEPTH;
+
+			// feature map
+			sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 1) * TILE_WIDTH + blockC + 1]
+				= fIn[ch * width * width + row * width + col];
+
+			// halo for feature
+			if(blockR == 0) // top row
+			{
+				sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + blockR * TILE_WIDTH + blockC + 1]
+					= (row != 0) ? fIn[ch * width * width + (row - 1) * width + col] : 0;
+				if(blockC == 0) // top left corner
+				{
+					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + blockR * TILE_WIDTH + blockC]
+						= (row != 0 && col != 0) ? fIn[ch * width * width + (row - 1) * width + col - 1] : 0;
+				}
+				if(blockC == BLOCK_WIDTH - 1) // top right corner
+				{
+					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + blockR * TILE_WIDTH + blockC + 2]
+						= (row != 0 && col != width - 1) ? fIn[ch * width * width + (row - 1) * width + col + 1] : 0;
+				}
+			}
+			else if(blockR == BLOCK_HEIGHT - 1) // bottom row
+			{
+				sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 2) * TILE_WIDTH + blockC + 1]
+					= (col != width - 1) ? fIn[ch * width * width + (row + 1) * width + col] : 0;
+				if(blockC == 0) // bottom left corner
+				{
+					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 2) * TILE_WIDTH + blockC]
+						= (row != width - 1 && col != 0) ? fIn[ch * width * width + (row + 1) * width + col - 1] : 0;
+				}
+				if(blockC == BLOCK_WIDTH - 1) // bottom right corner
+				{
+					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 2) * TILE_WIDTH + blockC + 2]
+						= (row != width - 1 && col != width - 1) ? fIn[ch * width * width + (row + 1) * width + col + 1] : 0;
+				}
+			}
+
+			if(blockC == 0) // left col
+			{
+				sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 1) * TILE_WIDTH + blockC]
+					= (col != 0) ? fIn[ch * width * width + row * width + col - 1] : 0;
+			}
+			else if(blockC == BLOCK_WIDTH - 1) // right col
+			{
+				sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 1) * TILE_WIDTH + blockC + 2]
+					= (row != width - 1) ? fIn[ch * width * width + row * width + col + 1] : 0;
+			}
+
+			// filter
+			if(blockR < 3 && blockC < 3) 
+			{
+				sFilter[subCh * 9 + blockR * 3 + blockC] 
+					= filter[filterId * nChannels * 9 + ch * 9 + row * 3 + col];
+			}
+		}
+		__syncthreads();
+
+		for(int subCh = 0; subCh < TILE_DEPTH; subCh++)
+		{
+			for(int i=0; i<3; i++)
+			{
+				for(int j=0; j<3; j++)
+				{
+					sum += sFilter[subCh * 9 + i * 3 + j]
+						* sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + i) * TILE_WIDTH + blockC + j];
+				}
+			}
+		}
+	}
+
+	fOut[filterId * width * width + row * width + col] = sum;
+}
+
 __global__ void reluForward(float* fIn, float* fOut, const int size)
 {
 	int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -142,13 +248,13 @@ __global__ void fullyConnectCUDA(float *fIn, float *filter,
 
 		// Declaration of the shared memory array Bs used to
 		// store the sub-matrix of B
-		__shared__ float Bs[BLOCK_HEIGHT][BLOCK_WIDTH];
+		__shared__ float Bs[BLOCK_WIDTH][BLOCK_HEIGHT];
 
 		// Load the matrices from device memory
 		// to shared memory; each thread loads
 		// one element of each matrix
 		As[ty][tx] = fIn[a + wFeature * ty + tx];
-		Bs[ty][tx] = filter[b + wFeature * ty + tx];
+		Bs[tx][ty] = filter[b + wFeature * tx + ty];
 
 		// Synchronize to make sure the matrices are loaded
 		__syncthreads();
@@ -274,45 +380,47 @@ void CNNCudaFunction::init()
 
 void CNNCudaFunction::fullyConnected(int width, int nChannels, int nFilters, int layerId)
 {
+	/*
+	   int filterSize = width * width * nChannels;
+	   float *featureIn = nullptr;
+	   checkCudaErrors(cudaMalloc(&featureIn, filterSize * sizeof(float)));
+	   checkCudaErrors(cudaMemcpy(featureIn, featureOut, filterSize * sizeof(float), cudaMemcpyDefault));
+
+	   const int batchSize = 1; // should be 2^n and lt 256 
+	   const int blockDimX = 256 / batchSize;
+	   const int blockDimY = batchSize;
+	   dim3 threads(blockDimX, blockDimY);
+	   const int gridDimX = (nFilters + blockDimX - 1) / blockDimX;
+	   const int gridDimY = (batchSize + blockDimY - 1) / blockDimY;
+	   dim3 grid(gridDimX, gridDimY);
+	   fullyConnectCUDA<blockDimY, blockDimX> <<<grid, threads>>>(
+	   featureIn, weights[layerId], 
+	   batchSize, nChannels, width, width, nFilters,
+	   bias[layerId], featureOut);
+	   */
+
 	int filterSize = width * width * nChannels;
 	float *featureIn = nullptr;
 	checkCudaErrors(cudaMalloc(&featureIn, filterSize * sizeof(float)));
 	checkCudaErrors(cudaMemcpy(featureIn, featureOut, filterSize * sizeof(float), cudaMemcpyDefault));
 
-	const int batchSize = 1; // should be 2^n and lt 256 
-	const int blockDimX = 256 / batchSize;
-	const int blockDimY = batchSize;
-	dim3 threads(blockDimX, blockDimY);
-	const int gridDimX = (nFilters + blockDimX - 1) / blockDimX;
-	const int gridDimY = (batchSize + blockDimY - 1) / blockDimY;
-	dim3 grid(gridDimX, gridDimY);
-	fullyConnectCUDA<blockDimY, blockDimX> <<<grid, threads>>>(
-			featureIn, weights[layerId], 
-			batchSize, nChannels, width, width, nFilters,
-			bias[layerId], featureOut);
+	// CUBLAS is column major, which needs extra transform
+	checkCudaErrors(cublasSgemm(cublasHandle, CUBLAS_OP_T, CUBLAS_OP_N,
+				nFilters, 1, filterSize, &alpha, weights[layerId], filterSize, 
+				featureIn, filterSize, &beta, featureOut, filterSize));
 
-	//int filterSize = width * width * nChannels;
-	//float *featureIn = nullptr;
-	//checkCudaErrors(cudaMalloc(&featureIn, filterSize * sizeof(float)));
-	//checkCudaErrors(cudaMemcpy(featureIn, featureOut, filterSize * sizeof(float), cudaMemcpyDefault));
-
-	//// CUBLAS is column major, which needs extra transform
-	//checkCudaErrors(cublasSgemm(cublasHandle, CUBLAS_OP_T, CUBLAS_OP_N,
-	//			nFilters, 1, filterSize, &alpha, weights[layerId], filterSize, 
-	//			featureIn, filterSize, &beta, featureOut, filterSize));
-
-	//// add bias
-	//checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnODesc,
-	//			CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, nFilters, 1, 1));
-	//checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnBiasDesc,
-	//			CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, nFilters, 1, 1));
-	//checkCudaErrors(cudnnAddTensor(cudnnHandle, 
-	//			&alpha, cudnnBiasDesc, bias[layerId], 
-	//			&alpha, cudnnODesc, featureOut));
+	// add bias
+	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnODesc,
+				CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, nFilters, 1, 1));
+	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnBiasDesc,
+				CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, 1, nFilters, 1, 1));
+	checkCudaErrors(cudnnAddTensor(cudnnHandle, 
+				&alpha, cudnnBiasDesc, bias[layerId], 
+				&alpha, cudnnODesc, featureOut));
 
 	// activation
-	//checkCudaErrors(cudnnActivationForward(cudnnHandle, cudnnActDesc, 
-	//			&alpha, cudnnODesc, featureOut, &beta, cudnnODesc, featureOut));
+	checkCudaErrors(cudnnActivationForward(cudnnHandle, cudnnActDesc, 
+				&alpha, cudnnODesc, featureOut, &beta, cudnnODesc, featureOut));
 
 	// activation: relu
 	reluForward<<<(nFilters + 255) / 256, 256>>>(
@@ -346,14 +454,19 @@ void CNNCudaFunction::convolution(int width, int nChannels, int nFilters, int la
 	checkCudaErrors(cudaMemcpy(dInput, featureOut, inputSize, cudaMemcpyDefault));
 	float *dFilter = weights[layerId];
 
-	int blockDim = 256;
+	const int tileDepth = 32;
+	const int blockWidth = 7;
+	const int blockHeight = 7;
+	int blockDim = blockWidth * blockHeight;
 	int gridDim = (nFilters * width * width + blockDim - 1) / blockDim;
-	convBias<<<gridDim, blockDim>>>(dInput, dFilter, nFilters, nChannels, 
+	convBiasShared<tileDepth, blockWidth, blockHeight><<<gridDim, blockDim>>>(dInput, dFilter, nFilters, nChannels, 
 			width, bias[layerId], featureOut);
+	checkCudaErrors(cudaDeviceSynchronize()); // for debugging
 
 	// activation: relu
 	reluForward<<<gridDim, blockDim>>>(featureOut, featureOut, nFilters * width * width);
 
+	checkCudaErrors(cudaDeviceSynchronize()); // for debugging
 	checkCudaErrors(cudaFree(dInput));
 }
 
