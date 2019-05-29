@@ -54,39 +54,51 @@ __global__ void convBias(float* fIn, float* filter,
 	fOut[filterId * width * width + row * width + col] = sum;
 }
 
-// nChannels % TILE_DEPTH should be 0 !
-// width % BLOCK_WIDTH and width % BLOCK_HEIGHT should be 0 !
 	template <int TILE_DEPTH, int BLOCK_WIDTH, int BLOCK_HEIGHT>
 __global__ void convBiasShared(float* fIn, float* filter, 
 		const int nFilters, const int nChannels, const int width, 
 		float* bias, float* fOut)
 {
+	// tid is the thread id in x dimension in a grid
 	int tid = blockIdx.x * blockDim.x + threadIdx.x;
-	if(tid >= nFilters * width * width)
-	{
-		return;
-	}
+
+	int rowStart = TODO;
+	int colStart = TODO;
+
+	//int row = tid / width;
+	//int col = tid % width;
+	//if(row >= width || col >= width) // here?
+	//{
+	//	return;
+	//}
+
+	int blockR = threadIdx.x / BLOCK_WIDTH;
+	int blockC = threadIdx.x % BLOCK_WIDTH;
+	int row = rowStart + blockR;
+	int col = colStart + blockC;
 
 	int const TILE_WIDTH = BLOCK_WIDTH + 2;
 	int const TILE_HEIGHT = BLOCK_HEIGHT + 2;
 	__shared__ float sFilter[TILE_DEPTH * 3 * 3];
 	__shared__ float sFeature[TILE_DEPTH * TILE_WIDTH * TILE_HEIGHT];
 
-	int filterId = tid / (width * width);
-	int row = (tid / width) % width;
-	int col = tid % width;
+	//int filterId = tid / (width * width);
+	//int row = (tid / width) % width;
+	//int col = tid % width;
+	int filterId = blockIdx.y;
 
-	int blockR = row % BLOCK_HEIGHT;
-	int blockC = col % BLOCK_WIDTH;
-
-	float sum = bias[filterId];
-	int split = nChannels / TILE_DEPTH;
+	float sum = 0;
+	//float sum = bias[filterId];
+	int split = (nChannels + TILE_DEPTH - 1) / TILE_DEPTH;
+	int ch = 0; // current processed channel ID.
 	for(int sp = 0; sp < split; sp++)
 	{
 		// init shared memory variables
-		for(int subCh = 0; subCh < TILE_DEPTH; subCh++)
+		for(int subCh = 0; 
+				subCh < TILE_DEPTH && ch < nChannels row < width && col < width; // TODO: reshape it to optimize initialization of filters 
+				subCh++, ch++)
 		{
-			int ch = subCh + sp * TILE_DEPTH;
+			//int ch = subCh + sp * TILE_DEPTH;
 
 			// feature map
 			sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 1) * TILE_WIDTH + blockC + 1]
@@ -102,22 +114,22 @@ __global__ void convBiasShared(float* fIn, float* filter,
 					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + blockR * TILE_WIDTH + blockC]
 						= (row != 0 && col != 0) ? fIn[ch * width * width + (row - 1) * width + col - 1] : 0;
 				}
-				if(blockC == BLOCK_WIDTH - 1) // top right corner
+				if(blockC == BLOCK_WIDTH - 1 || col == width - 1) // top right corner
 				{
 					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + blockR * TILE_WIDTH + blockC + 2]
 						= (row != 0 && col != width - 1) ? fIn[ch * width * width + (row - 1) * width + col + 1] : 0;
 				}
 			}
-			else if(blockR == BLOCK_HEIGHT - 1) // bottom row
+			else if(blockR == BLOCK_HEIGHT - 1 || row == width - 1) // bottom row
 			{
 				sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 2) * TILE_WIDTH + blockC + 1]
-					= (col != width - 1) ? fIn[ch * width * width + (row + 1) * width + col] : 0;
+					= (row != width - 1) ? fIn[ch * width * width + (row + 1) * width + col] : 0;
 				if(blockC == 0) // bottom left corner
 				{
 					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 2) * TILE_WIDTH + blockC]
 						= (row != width - 1 && col != 0) ? fIn[ch * width * width + (row + 1) * width + col - 1] : 0;
 				}
-				if(blockC == BLOCK_WIDTH - 1) // bottom right corner
+				if(blockC == BLOCK_WIDTH - 1 || col == width - 1) // bottom right corner
 				{
 					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 2) * TILE_WIDTH + blockC + 2]
 						= (row != width - 1 && col != width - 1) ? fIn[ch * width * width + (row + 1) * width + col + 1] : 0;
@@ -129,22 +141,35 @@ __global__ void convBiasShared(float* fIn, float* filter,
 				sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 1) * TILE_WIDTH + blockC]
 					= (col != 0) ? fIn[ch * width * width + row * width + col - 1] : 0;
 			}
-			else if(blockC == BLOCK_WIDTH - 1) // right col
+			else if(blockC == BLOCK_WIDTH - 1 || col == width - 1) // right col
 			{
 				sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 1) * TILE_WIDTH + blockC + 2]
-					= (row != width - 1) ? fIn[ch * width * width + row * width + col + 1] : 0;
+					= (col != width - 1) ? fIn[ch * width * width + row * width + col + 1] : 0;
 			}
 
 			// filter
+			/*
 			if(blockR < 3 && blockC < 3) 
 			{
 				sFilter[subCh * 9 + blockR * 3 + blockC] 
-					= filter[filterId * nChannels * 9 + ch * 9 + row * 3 + col];
+					= filter[filterId * nChannels * 9 + ch * 9 + blockR * 3 + blockC];
+			}
+			*/
+			// TODO: optimize the following code
+			for(int i = 0; i < 3; i++)
+			{
+				for(int j = 0; j < 3; j++)
+				{
+					if(threadIdx.x == 0)
+						sFilter[subCh * 9 + i * 3 + j] 
+							= filter[filterId * nChannels * 9 + ch * 9 + i * 3 + j];
+				}
 			}
 		}
 		__syncthreads();
 
-		for(int subCh = 0; subCh < TILE_DEPTH; subCh++)
+		ch = sp * TILE_DEPTH;
+		for(int subCh = 0; subCh < TILE_DEPTH && ch < nChannels; subCh++, ch++)
 		{
 			for(int i=0; i<3; i++)
 			{
@@ -449,22 +474,27 @@ void CNNCudaFunction::maxpool(int width, int nChannels)
 void CNNCudaFunction::convolution(int width, int nChannels, int nFilters, int layerId)
 {
 	std::size_t inputSize = width * width * nChannels * sizeof(float);
-	float* dInput= nullptr;
+	float* dInput = nullptr;
 	checkCudaErrors(cudaMalloc(&dInput, inputSize));
 	checkCudaErrors(cudaMemcpy(dInput, featureOut, inputSize, cudaMemcpyDefault));
 	float *dFilter = weights[layerId];
 
-	const int tileDepth = 32;
-	const int blockWidth = 7;
-	const int blockHeight = 7;
-	int blockDim = blockWidth * blockHeight;
-	int gridDim = (nFilters * width * width + blockDim - 1) / blockDim;
-	convBiasShared<tileDepth, blockWidth, blockHeight><<<gridDim, blockDim>>>(dInput, dFilter, nFilters, nChannels, 
+	const int tileDepth = 8;
+	const int blockWidth = 4;
+	const int blockHeight = 4;
+	int nBlockW = (width + blockWidth - 1) / blockWidth;
+	int nBlockH = (width + blockHeight - 1) / blockHeight;
+	int blockDimConv = (nBlockW * blockWidth) * (nBlockH * blockHeight);
+	dim3 gridDimConv(nBlockW * nBlockH, nFilters);
+	convBiasShared<tileDepth, blockWidth, blockHeight><<<gridDimConv, blockDimConv>>>(
+			dInput, dFilter, nFilters, nChannels, 
 			width, bias[layerId], featureOut);
 	checkCudaErrors(cudaDeviceSynchronize()); // for debugging
 
 	// activation: relu
-	reluForward<<<gridDim, blockDim>>>(featureOut, featureOut, nFilters * width * width);
+	int blockDimAct = 256;
+	int gridDimAct = (nFilters * width * width + blockDimAct - 1) / blockDimAct;
+	reluForward<<<gridDimAct, blockDimAct>>>(featureOut, featureOut, nFilters * width * width);
 
 	checkCudaErrors(cudaDeviceSynchronize()); // for debugging
 	checkCudaErrors(cudaFree(dInput));
