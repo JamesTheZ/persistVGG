@@ -115,25 +115,25 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	*/
-	CNNFunction *funcCudnn = new CNNCudnnFunction();
-	funcCudnn->init();
-	funcCudnn->readImage(image_file);
-	funcCudnn->readParameters(weights_file, bias_file);
+	//CNNFunction *funcCudnn = new CNNCudnnFunction();
+	//funcCudnn->init();
+	//funcCudnn->readImage(image_file);
+	//funcCudnn->readParameters(weights_file, bias_file);
 
 	//func->convolution(224, 3, 64, 0);
 	//funcCudnn->convolution(224, 3, 64, 0);
 
-	int theWidth = 5;
-	int theChannels = 1;
-	int theFilters = 1;
+	int theWidth = 224;
+	int theChannels = 3;
+	int theFilters = 64;
 
 	func->convolution(theWidth, theChannels, theFilters, 0);
-	funcCudnn->convolution(theWidth, theChannels, theFilters, 0);
+	//funcCudnn->convolution(theWidth, theChannels, theFilters, 0);
 
-	gridDim = (theWidth * theWidth * theFilters + blockDim - 1) / blockDim;
-	isSame<<<gridDim, blockDim>>>(func->featureOut, funcCudnn->featureOut, theWidth * theWidth, theFilters, false);
-	checkCudaErrors(cudaDeviceSynchronize());
-	return 0;
+	//gridDim = (theWidth * theWidth * theFilters + blockDim - 1) / blockDim;
+	//isSame<<<gridDim, blockDim>>>(func->featureOut, funcCudnn->featureOut, theWidth * theWidth, theFilters, false);
+	//checkCudaErrors(cudaDeviceSynchronize());
+	//return 0;
 
 	//func->convolution(4, 2, 1, 0);
 	//funcCudnn->convolution(4, 2, 1, 0);

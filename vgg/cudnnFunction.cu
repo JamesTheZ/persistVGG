@@ -135,13 +135,11 @@ void CNNCudnnFunction::convolution(int width, int nChannels, int nFilters, int l
 	checkCudaErrors(cudaDeviceSynchronize()); // for debugging
 
 	// add bias
-	/*
 	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnBiasDesc,
 				format, type, 1, nFilters, 1, 1));
 	checkCudaErrors(cudnnAddTensor(cudnnHandle, 
 				&alpha, cudnnBiasDesc, bias[layerId], 
 				&alpha, cudnnODesc, featureOut));
-				*/
 
 	// activation
 	checkCudaErrors(cudnnActivationForward(cudnnHandle, cudnnActDesc, 
