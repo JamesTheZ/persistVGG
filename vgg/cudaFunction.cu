@@ -87,12 +87,14 @@ __global__ void convBiasShared(float* fIn, float* filter,
 	float sum = bias[filterId];
 	int split = (nChannels + TILE_DEPTH - 1) / TILE_DEPTH;
 	int ch = 0; // current processed channel ID.
+#pragma unroll 0
 	for(int sp = 0; sp < split; sp++)
 	{
 		// put feature map in shared memory
 		if(row < width && col < width)
 		{
 			ch = sp * TILE_DEPTH;
+#pragma unroll 0
 			for(int subCh = 0; 
 					subCh < TILE_DEPTH && ch < nChannels;
 					subCh++, ch++)
@@ -104,6 +106,7 @@ __global__ void convBiasShared(float* fIn, float* filter,
 					= fIn[ch * width * width + row * width + col];
 
 				// halo for feature
+				// TODO: initialize of halo layer is expensive!!
 				if(blockR == 0) // top row
 				{
 					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + blockR * TILE_WIDTH + blockC + 1]
@@ -152,6 +155,7 @@ __global__ void convBiasShared(float* fIn, float* filter,
 		if(blockR < 3 && blockC < 3) 
 		{
 			ch = sp * TILE_DEPTH;
+#pragma unroll 0
 			for(int subCh = 0; 
 					subCh < TILE_DEPTH && ch < nChannels;
 					subCh++, ch++)
@@ -163,6 +167,7 @@ __global__ void convBiasShared(float* fIn, float* filter,
 		__syncthreads();
 
 		// calculate convolution
+#pragma unroll 0
 		if(row < width && col < width)
 		{
 			ch = sp * TILE_DEPTH;
@@ -452,7 +457,6 @@ void CNNCudaFunction::fullyConnected(int width, int nChannels, int nFilters, int
 	reluForward<<<(nFilters + 255) / 256, 256>>>(
 			featureOut, featureOut, nFilters);
 
-	checkCudaErrors(cudaDeviceSynchronize());
 	checkCudaErrors(cudaFree(featureIn));
 }
 
@@ -480,9 +484,9 @@ void CNNCudaFunction::convolution(int width, int nChannels, int nFilters, int la
 	checkCudaErrors(cudaMemcpy(dInput, featureOut, inputSize, cudaMemcpyDefault));
 	float *dFilter = weights[layerId];
 
-	const int tileDepth = 4;
-	const int blockWidth = 16;
-	const int blockHeight = 16;
+	const int tileDepth = 2;
+	const int blockWidth = 32;
+	const int blockHeight = 8;
 	int nBlockW = (width + blockWidth - 1) / blockWidth;
 	int nBlockH = (width + blockHeight - 1) / blockHeight;
 	int blockDimConv = blockWidth * blockHeight;
@@ -495,14 +499,12 @@ void CNNCudaFunction::convolution(int width, int nChannels, int nFilters, int la
 			dInput, dFilter, nFilters, nChannels, 
 			width, bias[layerId], featureOut);
 			*/
-	checkCudaErrors(cudaDeviceSynchronize()); // for debugging
 
 	// activation: relu
 	int blockDimAct = 256;
 	int gridDimAct = (nFilters * width * width + blockDimAct - 1) / blockDimAct;
 	reluForward<<<gridDimAct, blockDimAct>>>(featureOut, featureOut, nFilters * width * width);
 
-	checkCudaErrors(cudaDeviceSynchronize()); // for debugging
 	checkCudaErrors(cudaFree(dInput));
 }
 

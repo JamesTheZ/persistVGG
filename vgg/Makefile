@@ -1,7 +1,7 @@
 CC = g++
 NVCC = nvcc
-NVFLAGS = -O0 -std=c++11 -I. -I./inc -g -G #-arch=sm_30
-CXXFLAGS = -O0 -Wunused-result
+NVFLAGS = -O3 -std=c++11 -I. -I./inc -gencode arch=compute_61,code=sm_61 --use_fast_math #-g -G 
+CXXFLAGS = -O3 -Wunused-result
 LDFLAGS = -lm -lcublas -lcusparse -lcudnn
 TARGETS = vgg19 
 
@@ -27,3 +27,6 @@ clean:
 
 run: vgg19
 	./vgg19 image/cat1.txt vgg19_weight/vgg19_weight.txt vgg19_weight/vgg19_bias.txt vgg19_output_1000.txt
+
+runprof: vgg19
+	nvprof ./vgg19 image/cat1.txt vgg19_weight/vgg19_weight.txt vgg19_weight/vgg19_bias.txt vgg19_output_1000.txt

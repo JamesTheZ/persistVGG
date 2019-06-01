@@ -127,6 +127,8 @@ void CNNCudnnFunction::convolution(int width, int nChannels, int nFilters, int l
 
     float *dFilter = weights[layerId];
 
+	// maxwell_scudnn_128x64_relu_small_nn
+	// cudnn::maxwell::gemm::computeOffsetsKernel(cudnn::maxwell::gemm::ComputeOffsetsParams)
 	checkCudaErrors(cudnnConvolutionForward(cudnnHandle,
 				&alpha, cudnnIDesc, dInput, cudnnFDesc, dFilter, 
 				cudnnConvDesc, cudnnConvFwdAlgo, dWorkspace, workspaceSize,
@@ -137,11 +139,13 @@ void CNNCudnnFunction::convolution(int width, int nChannels, int nFilters, int l
 	// add bias
 	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnBiasDesc,
 				format, type, 1, nFilters, 1, 1));
+	// cudnnGenericOp_t = 0
 	checkCudaErrors(cudnnAddTensor(cudnnHandle, 
 				&alpha, cudnnBiasDesc, bias[layerId], 
 				&alpha, cudnnODesc, featureOut));
 
 	// activation
+	// cudnnGenericOp_t = 8
 	checkCudaErrors(cudnnActivationForward(cudnnHandle, cudnnActDesc, 
 				&alpha, cudnnODesc, featureOut, &beta, cudnnODesc, featureOut));
 

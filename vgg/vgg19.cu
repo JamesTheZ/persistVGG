@@ -61,7 +61,8 @@ __global__ void printArray(float *array, int nBatch, int nChannels, int height, 
 
 int main(int argc, char **argv)
 {
-	checkCudaErrors(cudaSetDevice(1));
+	//checkCudaErrors(cudaSetDevice(1));
+	printf("num args: %d\n", argc);
 	char *image_file = argv[1];
 	char *weights_file = argv[2];
 	char *bias_file = argv[3];
@@ -128,6 +129,9 @@ int main(int argc, char **argv)
 	int theFilters = 64;
 
 	func->convolution(theWidth, theChannels, theFilters, 0);
+
+//	return 0;
+
 	//funcCudnn->convolution(theWidth, theChannels, theFilters, 0);
 
 	//gridDim = (theWidth * theWidth * theFilters + blockDim - 1) / blockDim;
