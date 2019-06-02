@@ -65,13 +65,10 @@ __global__ void convBiasShared(float* fIn, float* filter,
 
 	// row/col in the input feature map 
 	int nBlockW = (width + BLOCK_WIDTH - 1) / BLOCK_WIDTH;
-	int row = blockIdx.x / nBlockW * BLOCK_HEIGHT + blockR;
-	int col = blockIdx.x % nBlockW * BLOCK_WIDTH + blockC;
-
-	if(row >= width && blockR >= 3 || col >= width && blockC >= 3)
-	{
-		return;
-	}
+	int blkY = blockIdx.x / nBlockW;
+	int blkX = blockIdx.x % nBlockW;
+	int row = blkY * BLOCK_HEIGHT + blockR;
+	int col = blkX * BLOCK_WIDTH + blockC;
 
 	int const TILE_WIDTH = BLOCK_WIDTH + 2;
 	int const TILE_HEIGHT = BLOCK_HEIGHT + 2;
@@ -87,66 +84,49 @@ __global__ void convBiasShared(float* fIn, float* filter,
 	float sum = bias[filterId];
 	int split = (nChannels + TILE_DEPTH - 1) / TILE_DEPTH;
 	int ch = 0; // current processed channel ID.
-#pragma unroll 0
+#pragma unroll 1
 	for(int sp = 0; sp < split; sp++)
 	{
-		// put feature map in shared memory
-		if(row < width && col < width)
+
+		// dest in smem
+		int destY = threadIdx.x / TILE_WIDTH;
+		int destX = threadIdx.x % TILE_WIDTH;
+		int srcY = blkY * BLOCK_HEIGHT + destY - 1;
+		int srcX = blkX * BLOCK_WIDTH + destX - 1;
+		bool inFeatureScope = (srcY >= 0 && srcY < width && srcX >= 0 && srcX < width);
+
+		ch = sp * TILE_DEPTH;
+#pragma unroll 1
+		for(int subCh = 0; 
+				subCh < TILE_DEPTH && ch < nChannels;
+				subCh++, ch++)
 		{
-			ch = sp * TILE_DEPTH;
-#pragma unroll 0
-			for(int subCh = 0; 
-					subCh < TILE_DEPTH && ch < nChannels;
-					subCh++, ch++)
+			// feature map
+			sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + destY * TILE_WIDTH + destX]
+				= inFeatureScope ? fIn[ch * width * width + srcY * width + srcX] : 0;
+		}
+
+#pragma unroll 1
+		for (int iter=1; 
+				iter <= (TILE_HEIGHT * TILE_WIDTH) / (BLOCK_HEIGHT * BLOCK_WIDTH); 
+				iter++)
+		{
+			destY = (threadIdx.x + iter * (BLOCK_HEIGHT * BLOCK_WIDTH)) / TILE_WIDTH;
+			destX = (threadIdx.x + iter * (BLOCK_HEIGHT * BLOCK_WIDTH)) % TILE_WIDTH;
+			srcY = blkY * BLOCK_HEIGHT + destY - 1;
+			srcX = blkX * BLOCK_WIDTH + destX - 1;
+			if (destY < TILE_HEIGHT && destX < TILE_WIDTH)
 			{
-				//int ch = subCh + sp * TILE_DEPTH;
-
-				// feature map
-				sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 1) * TILE_WIDTH + blockC + 1]
-					= fIn[ch * width * width + row * width + col];
-
-				// halo for feature
-				// TODO: initialize of halo layer is expensive!!
-				if(blockR == 0) // top row
+				inFeatureScope = (srcY >= 0 && srcY < width && srcX >= 0 && srcX < width);
+				ch = sp * TILE_DEPTH;
+#pragma unroll 1
+				for(int subCh = 0; 
+						subCh < TILE_DEPTH && ch < nChannels;
+						subCh++, ch++)
 				{
-					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + blockR * TILE_WIDTH + blockC + 1]
-						= (row != 0) ? fIn[ch * width * width + (row - 1) * width + col] : 0;
-					if(blockC == 0) // top left corner
-					{
-						sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + blockR * TILE_WIDTH + blockC]
-							= (row != 0 && col != 0) ? fIn[ch * width * width + (row - 1) * width + col - 1] : 0;
-					}
-					if(blockC == BLOCK_WIDTH - 1 || col == width - 1) // top right corner
-					{
-						sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + blockR * TILE_WIDTH + blockC + 2]
-							= (row != 0 && col != width - 1) ? fIn[ch * width * width + (row - 1) * width + col + 1] : 0;
-					}
-				}
-				else if(blockR == BLOCK_HEIGHT - 1 || row == width - 1) // bottom row
-				{
-					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 2) * TILE_WIDTH + blockC + 1]
-						= (row != width - 1) ? fIn[ch * width * width + (row + 1) * width + col] : 0;
-					if(blockC == 0) // bottom left corner
-					{
-						sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 2) * TILE_WIDTH + blockC]
-							= (row != width - 1 && col != 0) ? fIn[ch * width * width + (row + 1) * width + col - 1] : 0;
-					}
-					if(blockC == BLOCK_WIDTH - 1 || col == width - 1) // bottom right corner
-					{
-						sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 2) * TILE_WIDTH + blockC + 2]
-							= (row != width - 1 && col != width - 1) ? fIn[ch * width * width + (row + 1) * width + col + 1] : 0;
-					}
-				}
-
-				if(blockC == 0) // left col
-				{
-					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 1) * TILE_WIDTH + blockC]
-						= (col != 0) ? fIn[ch * width * width + row * width + col - 1] : 0;
-				}
-				else if(blockC == BLOCK_WIDTH - 1 || col == width - 1) // right col
-				{
-					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + 1) * TILE_WIDTH + blockC + 2]
-						= (col != width - 1) ? fIn[ch * width * width + row * width + col + 1] : 0;
+					// feature map
+					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + destY * TILE_WIDTH + destX]
+						= inFeatureScope ? fIn[ch * width * width + srcY * width + srcX] : 0;
 				}
 			}
 		}
@@ -155,7 +135,7 @@ __global__ void convBiasShared(float* fIn, float* filter,
 		if(blockR < 3 && blockC < 3) 
 		{
 			ch = sp * TILE_DEPTH;
-#pragma unroll 0
+#pragma unroll 1
 			for(int subCh = 0; 
 					subCh < TILE_DEPTH && ch < nChannels;
 					subCh++, ch++)
@@ -167,10 +147,10 @@ __global__ void convBiasShared(float* fIn, float* filter,
 		__syncthreads();
 
 		// calculate convolution
-#pragma unroll 0
 		if(row < width && col < width)
 		{
 			ch = sp * TILE_DEPTH;
+#pragma unroll 1
 			for(int subCh = 0; subCh < TILE_DEPTH && ch < nChannels; subCh++, ch++)
 			{
 				for(int i=0; i<3; i++)
@@ -494,11 +474,6 @@ void CNNCudaFunction::convolution(int width, int nChannels, int nFilters, int la
 	convBiasShared<tileDepth, blockWidth, blockHeight><<<gridDimConv, blockDimConv>>>(
 			dInput, dFilter, nFilters, nChannels, 
 			width, bias[layerId], featureOut);
-	/*
-	convBias<<<(nFilters * width * width + 255) / 256, 256>>>(
-			dInput, dFilter, nFilters, nChannels, 
-			width, bias[layerId], featureOut);
-			*/
 
 	// activation: relu
 	int blockDimAct = 256;

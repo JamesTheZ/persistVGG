@@ -79,10 +79,10 @@ void CNNFunction::readParameters(char *weightsFile, char *biasFile)
 	}
 	for(int i=0; i<16; i++)
 	{
-		//if(i == 1) // for debugging
-		//{
+		if(i == 1) // for debugging
+		{
 		//	return;
-		//}
+		}
 		int hiddenSize = filterSize[i] * channels[i];
 		int weightSize = hiddenSize * numFilters[i];
 		int biasSize = numFilters[i];
