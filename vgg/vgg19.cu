@@ -130,7 +130,9 @@ int main(int argc, char **argv)
 
 	func->convolution(theWidth, theChannels, theFilters, 0);
 
-	//return 0;
+#ifdef DEBUG
+	return 0;
+#endif
 
 	//funcCudnn->convolution(theWidth, theChannels, theFilters, 0);
 

@@ -64,233 +64,106 @@ __global__ void convBiasShared(float* fIn, float* filter,
 	int blockC = threadIdx.x % BLOCK_WIDTH;
 
 	// row/col in the input feature map 
-	//int nBlockW = (width + BLOCK_WIDTH - 1) / BLOCK_WIDTH;
-	//int blkY = blockIdx.x / nBlockW;
-	//int blkX = blockIdx.x % nBlockW;
 	int row = blockIdx.y * BLOCK_HEIGHT + blockR;
 	int col = blockIdx.x * BLOCK_WIDTH + blockC;
 
 	int const TILE_WIDTH = BLOCK_WIDTH + 2;
 	int const TILE_HEIGHT = BLOCK_HEIGHT + 2;
+	int const blockDim = BLOCK_WIDTH * BLOCK_HEIGHT;
+	int const tileDim = TILE_WIDTH * TILE_HEIGHT;
+
 	__shared__ float sFilter[TILE_DEPTH * 3 * 3];
-	__shared__ float sFeature[TILE_DEPTH * TILE_WIDTH * TILE_HEIGHT];
+	__shared__ float sFeature[TILE_DEPTH * tileDim];
 
-	//int filterId = tid / (width * width);
-	//int row = (tid / width) % width;
-	//int col = tid % width;
 	int filterId = blockIdx.z;
-
-	//float sum = 0;
 	float sum = bias[filterId];
+
 	int split = (nChannels + TILE_DEPTH - 1) / TILE_DEPTH;
 	int ch = 0; // current processed channel ID.
 #pragma unroll 1
 	for(int sp = 0; sp < split; sp++)
 	{
-
-		// dest in smem
-		int destY = threadIdx.x / TILE_WIDTH;
-		int destX = threadIdx.x % TILE_WIDTH;
-		int srcY = blockIdx.y * BLOCK_HEIGHT + destY - 1;
-		int srcX = blockIdx.x * BLOCK_WIDTH + destX - 1;
-		bool inFeatureScope = (srcY >= 0 && srcY < width && srcX >= 0 && srcX < width);
+		int destY, destX; // dest in smem
+		int srcY, srcX; // src in gmem
 
 		ch = sp * TILE_DEPTH;
+		int iterSize = min(nChannels - ch, TILE_DEPTH) * tileDim;
 #pragma unroll 1
-		for(int subCh = 0; 
-				subCh < TILE_DEPTH && ch < nChannels;
-				subCh++, ch++)
+		for(int idx = threadIdx.x; idx < iterSize; idx += blockDim)
 		{
-			// feature map
-			sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + destY * TILE_WIDTH + destX]
-				= inFeatureScope ? fIn[ch * width * width + srcY * width + srcX] : 0;
-		}
-
-#pragma unroll 1
-		for (int iter=1; 
-				iter <= (TILE_HEIGHT * TILE_WIDTH) / (BLOCK_HEIGHT * BLOCK_WIDTH); 
-				iter++)
-		{
-			destY = (threadIdx.x + iter * (BLOCK_HEIGHT * BLOCK_WIDTH)) / TILE_WIDTH;
-			destX = (threadIdx.x + iter * (BLOCK_HEIGHT * BLOCK_WIDTH)) % TILE_WIDTH;
+			int subCh = idx / tileDim;
+			destY = idx / TILE_WIDTH % TILE_HEIGHT;
+			destX = idx % TILE_WIDTH;
 			srcY = blockIdx.y * BLOCK_HEIGHT + destY - 1;
 			srcX = blockIdx.x * BLOCK_WIDTH + destX - 1;
-			if (destY < TILE_HEIGHT && destX < TILE_WIDTH)
-			{
-				inFeatureScope = (srcY >= 0 && srcY < width && srcX >= 0 && srcX < width);
-				ch = sp * TILE_DEPTH;
-#pragma unroll 1
-				for(int subCh = 0; 
-						subCh < TILE_DEPTH && ch < nChannels;
-						subCh++, ch++)
-				{
-					// feature map
-					sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + destY * TILE_WIDTH + destX]
-						= inFeatureScope ? fIn[ch * width * width + srcY * width + srcX] : 0;
-				}
-			}
+
+			sFeature[idx] = (srcY >= 0 && srcY < width && srcX >= 0 && srcX < width) ? 
+				fIn[(ch + subCh) * width * width + srcY * width + srcX] : 0;
 		}
 
-		// put filter into shared memory
-		if(blockR < 3 && blockC < 3) 
-		{
-			ch = sp * TILE_DEPTH;
+		/*
 #pragma unroll 1
-			for(int subCh = 0; 
-					subCh < TILE_DEPTH && ch < nChannels;
-					subCh++, ch++)
-			{
-				sFilter[subCh * 9 + blockR * 3 + blockC] 
-					= filter[filterId * nChannels * 9 + ch * 9 + blockR * 3 + blockC];
-			}
-		}
-		__syncthreads();
-
-		// calculate convolution
-		if(row < width && col < width)
-		{
-			ch = sp * TILE_DEPTH;
+for (int iter = 0; 
+iter <= tileDim / blockDim; 
+iter++)
+{
+destY = (threadIdx.x + iter * blockDim) / TILE_WIDTH;
+destX = (threadIdx.x + iter * blockDim) % TILE_WIDTH;
+if (destY < TILE_HEIGHT && destX < TILE_WIDTH)
+{
+srcY = blockIdx.y * BLOCK_HEIGHT + destY - 1;
+srcX = blockIdx.x * BLOCK_WIDTH + destX - 1;
+inFeatureScope = (srcY >= 0 && srcY < width && srcX >= 0 && srcX < width);
+ch = sp * TILE_DEPTH;
 #pragma unroll 1
-			for(int subCh = 0; subCh < TILE_DEPTH && ch < nChannels; subCh++, ch++)
-			{
-				for(int i=0; i<3; i++)
-				{
-					for(int j=0; j<3; j++)
-					{
-						sum += sFilter[subCh * 9 + i * 3 + j]
-							* sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + i) * TILE_WIDTH + blockC + j];
-					}
-				}
-			}
+for(int subCh = 0; 
+subCh < TILE_DEPTH && ch < nChannels;
+subCh++, ch++)
+{
+		// feature map
+		sFeature[subCh * tileDim + destY * TILE_WIDTH + destX]
+		= inFeatureScope ? fIn[ch * width * width + srcY * width + srcX] : 0;
 		}
-	}
+		}
+		}
+		*/
 
-	if(row < width && col < width)
+// put filter into shared memory
+for (int iter = 0; 
+		iter <= TILE_DEPTH * 9 / blockDim; 
+		iter++)
+{
+	int idx = threadIdx.x + iter * blockDim;
+	if(idx < TILE_DEPTH * 9)
 	{
-		fOut[filterId * width * width + row * width + col] = sum;
+		sFilter[idx] = filter[(filterId * nChannels + sp * TILE_DEPTH) * 9 + idx];
 	}
 }
+__syncthreads();
 
-
-	template <int TILE_DEPTH, int BLOCK_WIDTH, int BLOCK_HEIGHT>
-__global__ void convBiasShared2D(float* fIn, float* filter, 
-		const int nFilters, const int nChannels, const int width, 
-		float* bias, float* fOut)
+// calculate convolution
+if(row < width && col < width)
 {
-	// row/col in the block
-	int blockR = threadIdx.x / BLOCK_WIDTH;
-	int blockC = threadIdx.x % BLOCK_WIDTH;
-
-	// row/col in the input feature map 
-	int nBlockW = (width + BLOCK_WIDTH - 1) / BLOCK_WIDTH;
-	int blkY = blockIdx.x / nBlockW;
-	int blkX = blockIdx.x % nBlockW;
-	int row = blkY * BLOCK_HEIGHT + blockR;
-	int col = blkX * BLOCK_WIDTH + blockC;
-
-	int const TILE_WIDTH = BLOCK_WIDTH + 2;
-	int const TILE_HEIGHT = BLOCK_HEIGHT + 2;
-	__shared__ float sFilter[TILE_DEPTH * 3 * 3];
-	__shared__ float sFeature[TILE_DEPTH][TILE_HEIGHT][TILE_WIDTH];
-	//__shared__ float sFeature[TILE_DEPTH * TILE_WIDTH * TILE_HEIGHT];
-
-	//int filterId = tid / (width * width);
-	//int row = (tid / width) % width;
-	//int col = tid % width;
-	int filterId = blockIdx.y;
-
-	//float sum = 0;
-	float sum = bias[filterId];
-	int split = (nChannels + TILE_DEPTH - 1) / TILE_DEPTH;
-	int ch = 0; // current processed channel ID.
+	ch = sp * TILE_DEPTH;
 #pragma unroll 1
-	for(int sp = 0; sp < split; sp++)
+	for(int subCh = 0; subCh < TILE_DEPTH && ch < nChannels; subCh++, ch++)
 	{
-
-		// dest in smem
-		int destY = threadIdx.x / TILE_WIDTH;
-		int destX = threadIdx.x % TILE_WIDTH;
-		int srcY = blkY * BLOCK_HEIGHT + destY - 1;
-		int srcX = blkX * BLOCK_WIDTH + destX - 1;
-		bool inFeatureScope = (srcY >= 0 && srcY < width && srcX >= 0 && srcX < width);
-
-		ch = sp * TILE_DEPTH;
-#pragma unroll 1
-		for(int subCh = 0; 
-				subCh < TILE_DEPTH && ch < nChannels;
-				subCh++, ch++)
+		for(int i=0; i<3; i++)
 		{
-			// feature map
-			sFeature[subCh][destY][destX]
-			//sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + destY * TILE_WIDTH + destX]
-				= inFeatureScope ? fIn[ch * width * width + srcY * width + srcX] : 0;
-		}
-
-#pragma unroll 1
-		for (int iter=1; 
-				iter <= (TILE_HEIGHT * TILE_WIDTH) / (BLOCK_HEIGHT * BLOCK_WIDTH); 
-				iter++)
-		{
-			destY = (threadIdx.x + iter * (BLOCK_HEIGHT * BLOCK_WIDTH)) / TILE_WIDTH;
-			destX = (threadIdx.x + iter * (BLOCK_HEIGHT * BLOCK_WIDTH)) % TILE_WIDTH;
-			srcY = blkY * BLOCK_HEIGHT + destY - 1;
-			srcX = blkX * BLOCK_WIDTH + destX - 1;
-			if (destY < TILE_HEIGHT && destX < TILE_WIDTH)
+			for(int j=0; j<3; j++)
 			{
-				inFeatureScope = (srcY >= 0 && srcY < width && srcX >= 0 && srcX < width);
-				ch = sp * TILE_DEPTH;
-#pragma unroll 1
-				for(int subCh = 0; 
-						subCh < TILE_DEPTH && ch < nChannels;
-						subCh++, ch++)
-				{
-					// feature map
-					//sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + destY * TILE_WIDTH + destX]
-					sFeature[subCh][destY][destX]
-						= inFeatureScope ? fIn[ch * width * width + srcY * width + srcX] : 0;
-				}
-			}
-		}
-
-		// put filter into shared memory
-		if(blockR < 3 && blockC < 3) 
-		{
-			ch = sp * TILE_DEPTH;
-#pragma unroll 1
-			for(int subCh = 0; 
-					subCh < TILE_DEPTH && ch < nChannels;
-					subCh++, ch++)
-			{
-				sFilter[subCh * 9 + blockR * 3 + blockC] 
-					= filter[filterId * nChannels * 9 + ch * 9 + blockR * 3 + blockC];
-			}
-		}
-		__syncthreads();
-
-		// calculate convolution
-		if(row < width && col < width)
-		{
-			ch = sp * TILE_DEPTH;
-#pragma unroll 1
-			for(int subCh = 0; subCh < TILE_DEPTH && ch < nChannels; subCh++, ch++)
-			{
-				for(int i=0; i<3; i++)
-				{
-					for(int j=0; j<3; j++)
-					{
-						sum += sFilter[subCh * 9 + i * 3 + j]
-							//* sFeature[subCh * TILE_WIDTH * TILE_HEIGHT + (blockR + i) * TILE_WIDTH + blockC + j];
-							* sFeature[subCh][blockR + i][blockC + j];
-					}
-				}
+				sum += sFilter[subCh * 9 + i * 3 + j]
+					* sFeature[subCh * tileDim + (blockR + i) * TILE_WIDTH + blockC + j];
 			}
 		}
 	}
+}
+}
 
-	if(row < width && col < width)
-	{
-		fOut[filterId * width * width + row * width + col] = sum;
-	}
+if(row < width && col < width)
+{
+	fOut[filterId * width * width + row * width + col] = sum;
+}
 }
 
 __global__ void reluForward(float* fIn, float* fOut, const int size)
@@ -586,7 +459,7 @@ void CNNCudaFunction::convolution(int width, int nChannels, int nFilters, int la
 	checkCudaErrors(cudaMemcpy(dInput, featureOut, inputSize, cudaMemcpyDefault));
 	float *dFilter = weights[layerId];
 
-	const int tileDepth = 8;
+	const int tileDepth = 4;
 	const int blockWidth = 32;
 	const int blockHeight = 8;
 	int nBlockW = (width + blockWidth - 1) / blockWidth;
