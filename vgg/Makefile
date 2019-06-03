@@ -5,7 +5,7 @@ CXXFLAGS = -O3 -Wunused-result
 LDFLAGS = -lm -lcublas -lcusparse -lcudnn
 TARGETS = vgg19 
 
-DEBUGFLAGS = #-DDEBUG
+DEBUGFLAGS = -DDEBUG
 
 all: $(TARGETS)
 
