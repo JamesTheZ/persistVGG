@@ -5,6 +5,8 @@
 #include <cuda.h>
 #include <cublas_v2.h>
 
+#include "util.h"
+
 #include "cudnnFunction.h"
 #include "cublasFunction.h"
 #include "cudaFunction.h"
@@ -68,6 +70,8 @@ int main(int argc, char **argv)
 	char *bias_file = argv[3];
 	char *output_file = argv[4];
 
+	struct timeval start, end;
+
 	int blockDim = 256;
 	int gridDim;
 
@@ -127,6 +131,9 @@ int main(int argc, char **argv)
 	int theWidth = 224;
 	int theChannels = 3;
 	int theFilters = 64;
+
+	checkCudaErrors(cudaDeviceSynchronize());
+	gettimeofday(&start, NULL);
 
 	func->convolution(theWidth, theChannels, theFilters, 0);
 
@@ -209,6 +216,11 @@ int main(int argc, char **argv)
 
 	func->maxpool(14, 512);
 	//funcCudnn->maxpool(14, 512);
+	
+	checkCudaErrors(cudaDeviceSynchronize());
+	gettimeofday(&end, NULL);
+	struct timeval delta = timeDelta(start, end);
+	printTime(delta);
 
 	func->fullyConnected(7, 512, 4096, 16); // most time consuming file input
 	//funcCudnn->fullyConnected(7, 512, 4096, 16); // most time consuming file input

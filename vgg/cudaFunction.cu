@@ -1,6 +1,8 @@
 #include "cudaFunction.h"
 #include <cassert>
 
+#define ITEM_PER_THREAD 2
+
 //void printDArray(float *dArray, int size)
 //{
 //	float *hArray = new float[size];
@@ -75,8 +77,15 @@ __global__ void convBiasShared(float* fIn, float* filter,
 	__shared__ float sFilter[TILE_DEPTH * 3 * 3];
 	__shared__ float sFeature[TILE_DEPTH * tileDim];
 
-	int filterId = blockIdx.z;
-	float sum = bias[filterId];
+	int filterId = blockIdx.z * ITEM_PER_THREAD;
+	float sum[ITEM_PER_THREAD] = {0.0};
+#pragma unroll 1
+	for(int ft = 0; 
+			ft < ITEM_PER_THREAD && ft + filterId < nFilters; 
+			ft++)
+	{
+		sum[ft] = bias[ft + filterId];
+	}
 
 	int split = (nChannels + TILE_DEPTH - 1) / TILE_DEPTH;
 	int ch = 0; // current processed channel ID.
@@ -127,34 +136,44 @@ __global__ void convBiasShared(float* fIn, float* filter,
 				}
 			}
 		}
+		
+		//__syncthreads();
 
-		// put filter into shared memory
-		for (int iter = 0; 
-				iter <= TILE_DEPTH * 9 / blockDim; 
-				iter++)
-		{
-			int idx = threadIdx.x + iter * blockDim;
-			if(idx < TILE_DEPTH * 9)
-			{
-				sFilter[idx] = filter[(filterId * nChannels + sp * TILE_DEPTH) * 9 + idx];
-			}
-		}
-
-		__syncthreads();
-
-		// calculate convolution
-		if(row < width && col < width)
-		{
-			ch = sp * TILE_DEPTH;
 #pragma unroll 1
-			for(int subCh = 0; subCh < TILE_DEPTH && ch < nChannels; subCh++, ch++)
+		for(int ft = 0; 
+				ft < ITEM_PER_THREAD && ft + filterId < nFilters; 
+				ft++)
+		{
+
+			// put filter into shared memory
+#pragma unroll 1
+			for (int iter = 0; 
+					iter <= TILE_DEPTH * 9 / blockDim; 
+					iter++)
 			{
-				for(int i=0; i<3; i++)
+				int idx = threadIdx.x + iter * blockDim;
+				if(idx < TILE_DEPTH * 9)
 				{
-					for(int j=0; j<3; j++)
+					sFilter[idx] = filter[((ft + filterId) * nChannels + sp * TILE_DEPTH) * 9 + idx];
+				}
+			}
+
+			__syncthreads();
+
+			// calculate convolution
+			if(row < width && col < width)
+			{
+				ch = sp * TILE_DEPTH;
+#pragma unroll 1
+				for(int subCh = 0; subCh < TILE_DEPTH && ch < nChannels; subCh++, ch++)
+				{
+					for(int i=0; i<3; i++)
 					{
-						sum += sFilter[subCh * 9 + i * 3 + j]
-							* sFeature[subCh * tileDim + (blockR + i) * TILE_WIDTH + blockC + j];
+						for(int j=0; j<3; j++)
+						{
+							sum[ft] += sFilter[subCh * 9 + i * 3 + j]
+								* sFeature[subCh * tileDim + (blockR + i) * TILE_WIDTH + blockC + j];
+						}
 					}
 				}
 			}
@@ -163,7 +182,13 @@ __global__ void convBiasShared(float* fIn, float* filter,
 
 	if(row < width && col < width)
 	{
-		fOut[filterId * width * width + row * width + col] = sum;
+#pragma unroll 1
+		for(int ft = 0; 
+				ft < ITEM_PER_THREAD && ft + filterId < nFilters; 
+				ft++)
+		{
+			fOut[(ft + filterId) * width * width + row * width + col] = sum[ft];
+		}
 	}
 }
 
@@ -466,7 +491,7 @@ void CNNCudaFunction::convolution(int width, int nChannels, int nFilters, int la
 	int nBlockW = (width + blockWidth - 1) / blockWidth;
 	int nBlockH = (width + blockHeight - 1) / blockHeight;
 	int blockDimConv = blockWidth * blockHeight;
-	dim3 gridDimConv(nBlockW, nBlockH, nFilters);
+	dim3 gridDimConv(nBlockW, nBlockH, (nFilters + ITEM_PER_THREAD - 1) / ITEM_PER_THREAD);
 	convBiasShared<tileDepth, blockWidth, blockHeight><<<gridDimConv, blockDimConv>>>(
 			dInput, dFilter, nFilters, nChannels, 
 			width, bias[layerId], featureOut);
