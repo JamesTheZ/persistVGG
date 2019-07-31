@@ -16,8 +16,8 @@ class CNNPersistFunction : public CNNFunction
 		// each has 32 vals
 		int* firstSignalIn;
 		int* lastSignalOut;
-		int* signalIn[19]; // 19 layers maximum
-		int* SMs[19];
+		int volatile * signalIn[20]; // 19 layers maximum
+		int volatile * SMs[20];
 		cudaDeviceProp prop;
 
 	public:
