@@ -10,6 +10,7 @@
 #include "cudnnFunction.h"
 #include "cublasFunction.h"
 #include "cudaFunction.h"
+#include "persistFunction.h"
 
 __global__ void isSame(float *array1, float *array2, int height, int width, bool transform)
 {
@@ -75,7 +76,7 @@ int main(int argc, char **argv)
 	int blockDim = 256;
 	int gridDim;
 
-	CNNFunction *func = new CNNCudaFunction();
+	CNNFunction *func = new CNNPersistFunction();
 	func->init();
 	func->readImage(image_file);
 	func->readParameters(weights_file, bias_file);
@@ -135,7 +136,11 @@ int main(int argc, char **argv)
 	checkCudaErrors(cudaDeviceSynchronize());
 	gettimeofday(&start, NULL);
 
-	func->convolution(theWidth, theChannels, theFilters, 0);
+#ifdef CNN_PERSIST_FUNCTION_H
+	func->convPersist(theWidth, theChannels, theFilters, 0);
+#endif // CNN_PERSIST_FUNCTION_H
+
+	//func->convolution(theWidth, theChannels, theFilters, 0);
 
 #ifdef DEBUG
 	return 0;

@@ -82,6 +82,8 @@ void CNNFunction::readParameters(char *weightsFile, char *biasFile)
 #ifdef DEBUG
 		if(i == 1) // for debugging
 		{
+			printf("For debugging, only load layer 1.\n");
+			fflush(NULL);
 			return;
 		}
 #endif
@@ -158,18 +160,24 @@ void CNNFunction::writeOutput(char *output_file)
 
 void CNNFunction::fullyConnected(int width, int nChannels, int nFilters, int layerId)
 {
-	printf("Error. Not defined\n");
+	printf("ERROR: %s Not defined\n", __FUNCTION__);
 	exit(1);
 }
 
 void CNNFunction::maxpool(int width, int nChannels)
 {
-	printf("Error. Not defined\n");
+	printf("ERROR: %s Not defined\n", __FUNCTION__);
 	exit(1);
 }
 
 void CNNFunction::convolution(int width, int nChannels, int nFilters, int layerId)
 {
-	printf("Error. Not defined\n");
+	printf("ERROR: %s Not defined\n", __FUNCTION__);
+	exit(1);
+}
+
+void CNNFunction::convPersist(int width, int nChannels, int nFilters, int layerId)
+{
+	printf("ERROR: %s Not defined\n", __FUNCTION__);
 	exit(1);
 }

@@ -135,6 +135,7 @@ class CNNFunction
 		virtual void writeOutput(char *output_file);
 
 		virtual void convolution(int width, int nChannels, int nFilters, int layerId);
+		virtual void convPersist(int width, int nChannels, int nFilters, int layerId);
 		virtual void fullyConnected(int width, int nChannels, int nFilters, int layerId);
 		virtual void maxpool(int width, int nChannels);
 };

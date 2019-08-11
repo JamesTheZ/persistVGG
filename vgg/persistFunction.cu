@@ -1,5 +1,11 @@
 #include "persistFunction.h"
 
+// TODO: confirm this macro
+#define ITEM_PER_THREAD 16
+
+int volatile __managed__ signalIn[20];
+int volatile __managed__ SMs[20];
+
 void CNNPersistFunction::init()
 {
 	CNNFunction::init();
@@ -8,14 +14,20 @@ void CNNPersistFunction::init()
 	checkCudaErrors(cudaMallocManaged(&firstSignalIn, sizeof(int)*MAX_QUERY));
 	checkCudaErrors(cudaMallocManaged(&lastSignalOut, sizeof(int)*MAX_QUERY));
 
-	for(int i=0; i<20; i++)
-	{
-		checkCudaErrors(cudaMalloc(&signalIn[i], sizeof(int)*MAX_QUERY));
-		checkCudaErrors(cudaMallocManaged(&SMs[i], sizeof(int)*MAX_QUERY));
-	}
+	//for(int i=0; i<20; i++)
+	//{
+	//	checkCudaErrors(cudaMalloc(&signalIn, sizeof(int)*MAX_QUERY));
+	//	checkCudaErrors(cudaMallocManaged(&SMs, sizeof(int)*MAX_QUERY));
+	//}
 
 	// TODO: assign SM here.
+	for(int i=0; i<20; i++)
+	{
+		signalIn[i] = 0;
+		SMs[i] = 1;
+	}
 
+	__sync_synchronize();
 }
 
 __device__ inline uint getSMId()
@@ -33,13 +45,16 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 		const int nFilters, const int nChannels, const int width, 
 		float* bias, float* fOut, int layerId, int totalBlocks,
 		int blockCapacity, int minSM, int maxSM,
-		int nDimX, int nDimY, int nDimY)
+		int nDimX, int nDimY, int nDimZ)
 {
 	int smid = getSMId();
+	//printf("id: %d, min: %d, max: %d\n", smid, minSM, maxSM);
 	if(smid < minSM || smid >= maxSM)
 	{
 		return;
 	}
+
+	//printf("id: %d, min: %d, max: %d\n", smid, minSM, maxSM);
 
 	int const TILE_WIDTH = BLOCK_WIDTH + 2;
 	int const TILE_HEIGHT = BLOCK_HEIGHT + 2;
@@ -56,20 +71,45 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 	int split = (nChannels + TILE_DEPTH - 1) / TILE_DEPTH;
 
 	// persistent-thread begin
-	while(true)
+	__shared__ int isContinue;
+	if(threadIdx.x == 0)
 	{
-		if(signalIn[layerId] != 1) // 1 means current layer shoud be processed
+		isContinue = 1;
+	}
+	__syncthreads();
+	while(isContinue)
+	{
+		__shared__ int blockId;
+		if(threadIdx.x == 0)
+		{
+			if(atomicCAS_system((int*)&signalIn[layerId], 1, 2) != 1)
+			// if(signalIn[layerId] != 1) // 1 means current layer shoud be processed
+			{
+				//printf("signalIn[%d] = %d\n", layerId, signalIn[layerId]);
+				blockId = -1;
+				//continue;
+			}
+			else
+			{
+				//signalIn[layerId] = 2; // 2 means current layer is beging processing
+				//__threadfence();
+				blockId = atomicAdd(&initBlockId[layerId], 1);
+			}
+		}
+		__syncthreads();
+		if(blockId == -1)
 		{
 			continue;
 		}
-		signalIn[layerId] = 2; // 2 means current layer is beging processing
-		__threadfence();
-#pragma unroll 1
+		printf("read data for layer %d\n", layerId);
 		// blockId is the virtual global block ID for current layer
-		for(int blockId = atomicAdd(initBlockId[layerId]); 
-				blockId < totalBlocks; 
-				blockId += blockCapacity)
+#pragma unroll 1
+		for(; blockId < totalBlocks;)
 		{
+			if(threadIdx.x == 0)
+			{
+				//printf("blockId: %d/%d\n", blockId, totalBlocks);
+			}
 			// blockIdx_x/y/z are virtual blockIdx.x/y/z
 			int blockIdx_x = blockId % nDimX;
 			int blockIdx_y = (blockId / nDimX) % nDimY;
@@ -192,24 +232,35 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 						= sum[ft] >= 0 ? sum[ft] : 0;
 				}
 			}
+
+			if(threadIdx.x == 0)
+			{
+				blockId += blockCapacity;
+				if(blockId >= totalBlocks)
+				{
+					isContinue = false; // TODO: this is only for debugging
+				}
+			}
+			__syncthreads(); // TODO: not efficient
 		}
 
 		// TODO: sync with cooperate group, otherwise there might be data race
 		initBlockId[layerId] = 0;
 		signalIn[layerId] = 0;
-		__threadfence();
+		__threadfence_system();
 
 		// triger next layer
-		while(signalIn[layerId + 1] != 0)
+		//while(signalIn[layerId + 1] != 0)
+		while(atomicCAS_system((int*)&signalIn[layerId + 1], 0, 1) != 0)
 		{
 			__threadfence();
 		}
-		signalIn[layerId + 1] = 1;
+		//signalIn[layerId + 1] = 1;
 	}
 }
 
 
-void CNNCudaFunction::convPersist(int width, int nChannels, int nFilters, int layerId)
+void CNNPersistFunction::convPersist(int width, int nChannels, int nFilters, int layerId)
 {
 	std::size_t inputSize = width * width * nChannels * sizeof(float);
 	float* dInput = nullptr;
@@ -227,8 +278,10 @@ void CNNCudaFunction::convPersist(int width, int nChannels, int nFilters, int la
 	int sharedUsage = sizeof(float) * tileDepth * 
 		(3 * 3 + (blockWidth + 2) * (blockHeight + 2));
 	checkCudaErrors(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-				&numBlocksPerSM, convBiasPersist, 
+				&numBlocksPerSM, (void*)convBiasReluPersist<tileDepth, blockWidth, blockHeight>, 
 				blockSize, sharedUsage));
+	printf("numBlocksPerSM: %d\n", numBlocksPerSM);
+	fflush(NULL);
 	int layerSMs = SMs[layerId];
 	int minSM = 0;
 	for(int i=0; i<layerId; i++)
@@ -240,6 +293,10 @@ void CNNCudaFunction::convPersist(int width, int nChannels, int nFilters, int la
 	int maxBlocks = numBlocksPerSM * prop.multiProcessorCount;
 	int totalThreads = (width * width * nFilters + ITEM_PER_THREAD - 1) / ITEM_PER_THREAD;
 	int totalBlocks = (max(totalThreads, maxBlocks * blockSize) + blockSize - 1) / blockSize;
+	printf("%d, %d, %d\n", width * width * nFilters, prop.multiProcessorCount, blockSize);
+
+	printf("totalBlocks: %d\n", totalBlocks);
+	fflush(NULL);
 
 	int nDimX = (width + blockWidth - 1) / blockWidth;
 	int nDimY = (width + blockHeight - 1) / blockHeight;
@@ -248,12 +305,23 @@ void CNNCudaFunction::convPersist(int width, int nChannels, int nFilters, int la
 	int blockDimConv = blockWidth * blockHeight;
 	int gridDimConv = totalBlocks;
 	cudaStream_t stream;
-	checkCudaErrors(cudaStreamCreateWithFlags(&stream, cudaNonBlocking));
+	checkCudaErrors(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+	
+	printf("persist kernel launch now.\n");
+	fflush(NULL);
+#ifdef DEBUG
+	signalIn[0] = 1;
+	__sync_synchronize();
+#endif
+
 	convBiasReluPersist<tileDepth, blockWidth, blockHeight><<<gridDimConv, blockDimConv, 0, stream>>>(
 			dInput, dFilter, nFilters, nChannels, 
 			width, bias[layerId], featureOut, layerId, 
 			totalBlocks, blockCapacity, minSM, maxSM,
-			nDimX, nDimY, nDimY);
+			nDimX, nDimY, nDimZ);
+
+	checkCudaErrors(cudaDeviceSynchronize());
+	
 
 	/*
 	// activation: relu

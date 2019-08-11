@@ -1,5 +1,5 @@
-#ifndef CNN_CUDA_FUNCTION_H
-#define CNN_CUDA_FUNCTION_H
+#ifndef CNN_PERSIST_FUNCTION_H
+#define CNN_PERSIST_FUNCTION_H
 
 #include "cudnn.h"
 #include "cublas_v2.h"
@@ -16,8 +16,8 @@ class CNNPersistFunction : public CNNFunction
 		// each has 32 vals
 		int* firstSignalIn;
 		int* lastSignalOut;
-		int volatile * signalIn[20]; // 19 layers maximum
-		int volatile * SMs[20];
+		//int volatile signalIn[20]; // 19 layers maximum
+		//int volatile SMs[20];
 		cudaDeviceProp prop;
 
 	public:
@@ -26,7 +26,7 @@ class CNNPersistFunction : public CNNFunction
 		//virtual void fullyConnected(int width, int nChannels, int nFilters, int layerId) override;
 		//virtual void maxpool(int width, int nChannels) override;
 
-		void convPersist(int width, int nChannels, int nFilters, int layerId);
+		void convPersist(int width, int nChannels, int nFilters, int layerId) override;
 		void maxpoolPersist(int width, int nChannels, int id);
 
 	//private:

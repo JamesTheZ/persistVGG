@@ -5,12 +5,14 @@ CXXFLAGS = -O3 -Wunused-result
 LDFLAGS = -lm -lcublas -lcusparse -lcudnn
 TARGETS = vgg19 
 
-DEBUGFLAGS = #-DDEBUG
+DEBUGFLAGS = -DDEBUG
+
+SRC = vgg19.cu cudaFunction.cu cudnnFunction.cu cublasFunction.cu function.cu util.cu persistFunction.cu
 
 all: $(TARGETS)
 
-vgg19: vgg19.cu cudaFunction.cu cudnnFunction.cu cublasFunction.cu function.cu util.cu Makefile
-	$(NVCC) $(NVFLAGS) ${DEBUGFLAGS} -Xcompiler="$(CXXFLAGS)" $(LDFLAGS) -o $@ vgg19.cu cudnnFunction.cu cublasFunction.cu cudaFunction.cu function.cu util.cu
+vgg19:$(SRC) Makefile
+	$(NVCC) $(NVFLAGS) ${DEBUGFLAGS} -Xcompiler="$(CXXFLAGS)" $(LDFLAGS) -o $@ $(SRC)
 
 %: %.cpp
 	$(CC) $(CXXFLAGS) $(LDFLAGS) -o $@ $?
