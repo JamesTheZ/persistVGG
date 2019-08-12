@@ -1,7 +1,7 @@
 #include "cudaFunction.h"
 #include <cassert>
 
-#define ITEM_PER_THREAD 2
+#define ITEM_PER_THREAD 8
 
 //void printDArray(float *dArray, int size)
 //{

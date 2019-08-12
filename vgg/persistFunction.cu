@@ -1,7 +1,7 @@
 #include "persistFunction.h"
 
 // TODO: confirm this macro
-#define ITEM_PER_THREAD 16
+#define ITEM_PER_THREAD 1
 
 int volatile __managed__ signalIn[20];
 int volatile __managed__ SMs[20];
@@ -13,6 +13,9 @@ void CNNPersistFunction::init()
 	// using unified memory for convinent, to optimize..
 	checkCudaErrors(cudaMallocManaged(&firstSignalIn, sizeof(int)*MAX_QUERY));
 	checkCudaErrors(cudaMallocManaged(&lastSignalOut, sizeof(int)*MAX_QUERY));
+
+	// NOTE: currently we use device 0 as default.
+	checkCudaErrors(cudaGetDeviceProperties(&prop, 0));
 
 	//for(int i=0; i<20; i++)
 	//{
@@ -51,6 +54,7 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 	//printf("id: %d, min: %d, max: %d\n", smid, minSM, maxSM);
 	if(smid < minSM || smid >= maxSM)
 	{
+		// TODO: make sure #block does not exceed the maximum num on each SM
 		return;
 	}
 
@@ -82,18 +86,19 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 		__shared__ int blockId;
 		if(threadIdx.x == 0)
 		{
-			if(atomicCAS_system((int*)&signalIn[layerId], 1, 2) != 1)
+			int currentSignal = atomicCAS_system((int*)&signalIn[layerId], 1, 2);
+			if(currentSignal == 1 || currentSignal == 2)
 			// if(signalIn[layerId] != 1) // 1 means current layer shoud be processed
-			{
-				//printf("signalIn[%d] = %d\n", layerId, signalIn[layerId]);
-				blockId = -1;
-				//continue;
-			}
-			else
 			{
 				//signalIn[layerId] = 2; // 2 means current layer is beging processing
 				//__threadfence();
 				blockId = atomicAdd(&initBlockId[layerId], 1);
+			}
+			else
+			{
+				//printf("signalIn[%d] = %d\n", layerId, signalIn[layerId]);
+				blockId = -1;
+				//continue;
 			}
 		}
 		__syncthreads();
@@ -101,15 +106,11 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 		{
 			continue;
 		}
-		printf("read data for layer %d\n", layerId);
+		//printf("read data for layer %d\n", layerId);
 		// blockId is the virtual global block ID for current layer
 #pragma unroll 1
 		for(; blockId < totalBlocks;)
 		{
-			if(threadIdx.x == 0)
-			{
-				//printf("blockId: %d/%d\n", blockId, totalBlocks);
-			}
 			// blockIdx_x/y/z are virtual blockIdx.x/y/z
 			int blockIdx_x = blockId % nDimX;
 			int blockIdx_y = (blockId / nDimX) % nDimY;
@@ -120,6 +121,13 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 			int col = blockIdx_x * BLOCK_WIDTH + blockC;
 
 			int filterId = blockIdx_z * ITEM_PER_THREAD;
+			if(threadIdx.x == 0)
+			{
+				//printf("blockId: %d/%d\n", blockId, totalBlocks); // for debugging
+				//printf("blockId: %d, blockIdx_x: %d, blockIdx_y: %d, blockIdx_z: %d, filterId: %d\n",
+				//		blockId, blockIdx_x, blockIdx_y, blockIdx_z, filterId);
+			}
+
 			float sum[ITEM_PER_THREAD] = {0.0};
 #pragma unroll 1
 			for(int ft = 0; 
@@ -136,21 +144,6 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 				int destY, destX; // dest in smem
 				int srcY, srcX; // src in gmem
 				float inFeatureScope;
-
-				// load feature map to shared mem
-				//ch = sp * TILE_DEPTH;
-				//int iterSize = min(nChannels - ch, TILE_DEPTH) * tileDim;
-				//for(int idx = threadIdx.x; idx < iterSize; idx += blockDim)
-				//{
-				//	int subCh = idx / tileDim;
-				//	destY = idx / TILE_WIDTH % TILE_HEIGHT;
-				//	destX = idx % TILE_WIDTH;
-				//	srcY = blockIdx.y * BLOCK_HEIGHT + destY - 1;
-				//	srcX = blockIdx.x * BLOCK_WIDTH + destX - 1;
-
-				//	sFeature[idx] = (srcY >= 0 && srcY < width && srcX >= 0 && srcX < width) ? 
-				//		fIn[(ch + subCh) * width * width + srcY * width + srcX] : 0;
-				//}
 
 				// load feature map to shared mem
 #pragma unroll 1
@@ -238,7 +231,7 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 				blockId += blockCapacity;
 				if(blockId >= totalBlocks)
 				{
-					isContinue = false; // TODO: this is only for debugging
+					isContinue = 0; // TODO: this is only for debugging
 				}
 			}
 			__syncthreads(); // TODO: not efficient
@@ -251,11 +244,13 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 
 		// triger next layer
 		//while(signalIn[layerId + 1] != 0)
-		while(atomicCAS_system((int*)&signalIn[layerId + 1], 0, 1) != 0)
+		if(false) // TODO: check whether all blocks are processed
 		{
-			__threadfence();
+			while(atomicCAS_system((int*)&signalIn[layerId + 1], 0, 1) != 0)
+			{
+				__threadfence();
+			}
 		}
-		//signalIn[layerId + 1] = 1;
 	}
 }
 
@@ -281,6 +276,7 @@ void CNNPersistFunction::convPersist(int width, int nChannels, int nFilters, int
 				&numBlocksPerSM, (void*)convBiasReluPersist<tileDepth, blockWidth, blockHeight>, 
 				blockSize, sharedUsage));
 	printf("numBlocksPerSM: %d\n", numBlocksPerSM);
+	printf("numSMs: %d\n", prop.multiProcessorCount);
 	fflush(NULL);
 	int layerSMs = SMs[layerId];
 	int minSM = 0;
@@ -291,23 +287,24 @@ void CNNPersistFunction::convPersist(int width, int nChannels, int nFilters, int
 	int maxSM = minSM + layerSMs;
 	int blockCapacity = layerSMs * numBlocksPerSM;
 	int maxBlocks = numBlocksPerSM * prop.multiProcessorCount;
-	int totalThreads = (width * width * nFilters + ITEM_PER_THREAD - 1) / ITEM_PER_THREAD;
-	int totalBlocks = (max(totalThreads, maxBlocks * blockSize) + blockSize - 1) / blockSize;
-	printf("%d, %d, %d\n", width * width * nFilters, prop.multiProcessorCount, blockSize);
-
-	printf("totalBlocks: %d\n", totalBlocks);
-	fflush(NULL);
 
 	int nDimX = (width + blockWidth - 1) / blockWidth;
 	int nDimY = (width + blockHeight - 1) / blockHeight;
 	int nDimZ = (nFilters + ITEM_PER_THREAD - 1) / ITEM_PER_THREAD;
 
+	int totalBlocks = nDimX * nDimY * nDimZ;
+
+	printf("%d, %d, %d\n", width * width * nFilters, prop.multiProcessorCount, blockSize);
+	printf("totalBlocks: %d\n", totalBlocks);
+	fflush(NULL);
+
 	int blockDimConv = blockWidth * blockHeight;
-	int gridDimConv = totalBlocks;
+	//int gridDimConv = totalBlocks;
+	int gridDimConv = maxBlocks;
 	cudaStream_t stream;
 	checkCudaErrors(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
 	
-	printf("persist kernel launch now.\n");
+	printf("persist kernel of layer %d launch now.\n", layerId);
 	fflush(NULL);
 #ifdef DEBUG
 	signalIn[0] = 1;
@@ -321,15 +318,9 @@ void CNNPersistFunction::convPersist(int width, int nChannels, int nFilters, int
 			nDimX, nDimY, nDimZ);
 
 	checkCudaErrors(cudaDeviceSynchronize());
+
+	printf("persist kernel of layer %d ends\n", layerId);
 	
-
-	/*
-	// activation: relu
-	int blockDimAct = 256;
-	int gridDimAct = (nFilters * width * width + blockDimAct - 1) / blockDimAct;
-	reluForward<<<gridDimAct, blockDimAct>>>(featureOut, featureOut, nFilters * width * width);
-	*/
-
 	//checkCudaErrors(cudaFree(dInput));
 }
 
