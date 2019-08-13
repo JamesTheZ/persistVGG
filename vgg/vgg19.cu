@@ -11,6 +11,7 @@
 #include "cublasFunction.h"
 #include "cudaFunction.h"
 #include "persistFunction.h"
+#include "persistInfer.h"
 
 __global__ void isSame(float *array1, float *array2, int height, int width, bool transform)
 {
@@ -43,6 +44,11 @@ __global__ void isSame(float *array1, float *array2, int height, int width, bool
 			printf("not same at %d, %f ~ %f\n", 
 					threadId, array1[r * width + c], array2[r * width + c]);
 		}
+		//else
+		//{
+		//	printf("%d: %f ~ %f\n", 
+		//			threadId, array1[r * width + c], array2[r * width + c]);
+		//}
 	}
 }
 
@@ -64,7 +70,6 @@ __global__ void printArray(float *array, int nBatch, int nChannels, int height, 
 
 int main(int argc, char **argv)
 {
-	//checkCudaErrors(cudaSetDevice(1));
 	printf("num args: %d\n", argc);
 	char *image_file = argv[1];
 	char *weights_file = argv[2];
@@ -76,96 +81,46 @@ int main(int argc, char **argv)
 	int blockDim = 256;
 	int gridDim;
 
-	//CNNFunction *func = new CNNCudaFunction();
 	CNNFunction *func = new CNNPersistFunction();
 	func->init();
 	func->readImage(image_file);
 	func->readParameters(weights_file, bias_file);
 
-	/*
-	{ // for debugging
-		CNNFunction *funcCudnn = new CNNCudnnFunction();
-		funcCudnn->init();
-		funcCudnn->readImage(image_file);
-		funcCudnn->readParameters(weights_file, bias_file);
-
-		//		checkCudaErrors(cudaDeviceSynchronize());
-		//		printf("filter out:\n");
-		//		fflush(NULL);
-		//		printArray<<<1, 3 * 3 * 1>>>(func->weights[0], 1, 1, 3, 3, 3 * 3 * 1);
-		//		checkCudaErrors(cudaDeviceSynchronize());
-		//		printf("featuremap:\n");
-		//		fflush(NULL);
-		//		printArray<<<1, 4 * 4 * 1>>>(func->featureOut, 1, 1, 4, 4, 4 * 4 * 1);
-
-		int theWidth = 224;
-		int theChannels = 3;
-		int theFilters = 64;
-		func->convolution(theWidth, theChannels, theFilters, 0);
-		checkCudaErrors(cudaDeviceSynchronize());
-		funcCudnn->convolution(theWidth, theChannels, theFilters, 0);
-		checkCudaErrors(cudaDeviceSynchronize());
-
-		gridDim = (theWidth * theWidth * theFilters + blockDim - 1) / blockDim;
-		isSame<<<gridDim, blockDim>>>(func->featureOut, funcCudnn->featureOut, theWidth * theWidth, theFilters, false);
-
-		//printf("cuda out:\n");
-		//fflush(NULL);
-		//printArray<<<gridDim, blockDim>>>(func->featureOut, 1, theFilters, theWidth, theWidth, theFilters * theWidth * theWidth);
-		//checkCudaErrors(cudaDeviceSynchronize());
-
-		//printf("cudnn out:\n");
-		//fflush(NULL);
-		//printArray<<<1, 4 * 4 * 2>>>(funcCudnn->featureOut, 1, 2, 4, 4, 4 * 4 * 2);
-		checkCudaErrors(cudaDeviceSynchronize());
-
-		return 0;
-	}
-	*/
-	//CNNFunction *funcCudnn = new CNNCudnnFunction();
-	//funcCudnn->init();
-	//funcCudnn->readImage(image_file);
-	//funcCudnn->readParameters(weights_file, bias_file);
-
+	//printArray<<<gridDim, blockDim>>>(func->featureOut, 1, theFilters, theWidth, theWidth, theFilters * theWidth * theWidth);
+	//checkCudaErrors(cudaDeviceSynchronize());
 	//func->convolution(224, 3, 64, 0);
 	//funcCudnn->convolution(224, 3, 64, 0);
-
-	int theWidth = 224;
-	int theChannels = 3;
-	int theFilters = 64;
 
 	checkCudaErrors(cudaDeviceSynchronize());
 	gettimeofday(&start, NULL);
 
-	func->convPersist(theWidth, theChannels, theFilters, 0);
-	//func->convolution(theWidth, theChannels, theFilters, 0);
+	func->convPersist(224, 3, 64, 0);
+	func->convPersist(224, 64, 64, 1);
+	
+	PersistInfer::signalIn[0] = 1;
+	__sync_synchronize();
 
 #ifdef DEBUG
+	checkCudaErrors(cudaDeviceSynchronize());
+
 	CNNFunction *funcCudnn = new CNNCudnnFunction();
 	funcCudnn->init();
 	funcCudnn->readImage(image_file);
 	funcCudnn->readParameters(weights_file, bias_file);
-	funcCudnn->convolution(theWidth, theChannels, theFilters, 0);
+
+	funcCudnn->convolution(224, 3, 64, 0);
+	funcCudnn->convolution(224, 64, 64, 1);
+
+	int theWidth = 224;
+	int theFilters = 64;
 	checkCudaErrors(cudaDeviceSynchronize());
 
 	gridDim = (theWidth * theWidth * theFilters + blockDim - 1) / blockDim;
-	isSame<<<gridDim, blockDim>>>(func->featureOut, funcCudnn->featureOut, theWidth * theWidth, theFilters, false);
+	isSame<<<gridDim, blockDim>>>(func->featureMap[2], funcCudnn->featureOut, theWidth * theWidth, theFilters, false);
 	checkCudaErrors(cudaDeviceSynchronize());
 
-	//func->convolution(4, 2, 1, 0);
-	//funcCudnn->convolution(4, 2, 1, 0);
-
-	//checkCudaErrors(cudaDeviceSynchronize());
-	//gridDim = (4 * 4 * 1 + blockDim - 1) / blockDim;
-	//isSame<<<gridDim, blockDim>>>(func->featureOut, funcCudnn->featureOut, 4 * 4, 1, false);
-	//checkCudaErrors(cudaDeviceSynchronize());
-
 	return 0;
-
 #endif
-
-	func->convolution(224, 64, 64, 1);
-	//funcCudnn->convolution(224, 64, 64, 1);
 
 	func->maxpool(224, 64);
 	//funcCudnn->maxpool(224, 64);

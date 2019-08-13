@@ -126,6 +126,9 @@ class CNNFunction
 		float *weights[19];
 		float *bias[19];
 		float *parameters[19]; // fuse weights and bias together
+		int structure[19][4];
+
+		float* featureMap[19]; // TODO: suppose it is float type
 
 	public:
 		virtual void init();

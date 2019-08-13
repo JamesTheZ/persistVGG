@@ -25,6 +25,7 @@ void CNNFunction::readImage(char *imageFile)
 	}
 
 	checkCudaErrors(cudaMemcpy(featureOut, image, 224 * 224 * 3 * sizeof(float), cudaMemcpyDefault));
+	checkCudaErrors(cudaMemcpy(featureMap[0], image, 224 * 224 * 3 * sizeof(float), cudaMemcpyDefault));
 }
 
 void CNNFunction::init()
@@ -53,6 +54,43 @@ void CNNFunction::init()
 
 	// malloc features, max feature map: 224 * 224 * 64
 	checkCudaErrors(cudaMalloc(&featureOut, (224*224*64)*sizeof(float)));
+
+	int structureNCHW[19][4] = 
+	{ 
+		{64,   3,    224, 224},
+		{64,   64,   224, 224},
+		{128,  64,   112, 112},
+		{128,  128,  112, 112},
+		{256,  128,  56,  56}, 
+		{256,  256,  56,  56}, 
+		{256,  256,  56,  56}, 
+		{256,  256,  56,  56}, 
+		{512,  256,  28,  28}, 
+		{512,  512,  28,  28}, 
+		{512,  512,  28,  28}, 
+		{512,  512,  28,  28}, 
+		{512,  512,  14,  14}, 
+		{512,  512,  14,  14}, 
+		{512,  512,  14,  14}, 
+		{512,  512,  14,  14}, 
+		{4096, 512,  1,   1},  
+		{4096, 4096, 1,   1},  
+		{1000, 4096, 1,   1}  
+	};
+
+	memcpy(structure, structureNCHW, sizeof(structure));
+
+	for(int i=0; i<19; i++)
+	{
+		int layerId = i; // TODO: convert it in the future
+		int curLayerSize = structure[layerId][2] * structure[layerId][3] * structure[layerId][1];
+		int prevLayerSize = (i == 0) ? 0 : 
+			structure[layerId-1][2] * structure[layerId-1][3] * structure[layerId-1][1];
+		std::size_t inputSize = max(curLayerSize, prevLayerSize) * sizeof(float); // h * w * c * sizebytes
+		checkCudaErrors(cudaMalloc(&featureMap[i], inputSize));
+	}
+
+	//checkCudaErrors(cudaMemcpy(featureMap[0], image, 224 * 224 * 3 * sizeof(float), cudaMemcpyDefault));
 }
 
 void CNNFunction::readParameters(char *weightsFile, char *biasFile)
@@ -80,9 +118,9 @@ void CNNFunction::readParameters(char *weightsFile, char *biasFile)
 	for(int i=0; i<16; i++)
 	{
 #ifdef DEBUG
-		if(i == 1) // for debugging
+		if(i == 2) // for debugging
 		{
-			printf("For debugging, only load layer 1.\n");
+			printf("For debugging, only load layers till %d.\n", i - 1);
 			fflush(NULL);
 			return;
 		}

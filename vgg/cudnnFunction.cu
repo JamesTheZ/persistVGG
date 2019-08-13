@@ -121,9 +121,7 @@ void CNNCudnnFunction::convolution(int width, int nChannels, int nFilters, int l
 	std::size_t inputSize = width * width * nChannels * sizeof(float);
 	float* dInput= nullptr;
     checkCudaErrors(cudaMalloc(&dInput, inputSize));
-	checkCudaErrors(cudaDeviceSynchronize()); // for debugging
 	checkCudaErrors(cudaMemcpy(dInput, featureOut, inputSize, cudaMemcpyDefault));
-	checkCudaErrors(cudaDeviceSynchronize()); // for debugging
 
     float *dFilter = weights[layerId];
 
@@ -134,8 +132,6 @@ void CNNCudnnFunction::convolution(int width, int nChannels, int nFilters, int l
 				cudnnConvDesc, cudnnConvFwdAlgo, dWorkspace, workspaceSize,
 				&beta, cudnnODesc, featureOut));
 	
-	checkCudaErrors(cudaDeviceSynchronize()); // for debugging
-
 	// add bias
 	checkCudaErrors(cudnnSetTensor4dDescriptor(cudnnBiasDesc,
 				format, type, 1, nFilters, 1, 1));
@@ -148,8 +144,6 @@ void CNNCudnnFunction::convolution(int width, int nChannels, int nFilters, int l
 	// cudnnGenericOp_t = 8
 	checkCudaErrors(cudnnActivationForward(cudnnHandle, cudnnActDesc, 
 				&alpha, cudnnODesc, featureOut, &beta, cudnnODesc, featureOut));
-
-	checkCudaErrors(cudaDeviceSynchronize()); // for debugging
 
 	checkCudaErrors(cudaFree(dInput));
 	checkCudaErrors(cudaFree(dWorkspace));

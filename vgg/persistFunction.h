@@ -4,6 +4,7 @@
 #include "cudnn.h"
 #include "cublas_v2.h"
 #include "function.h"
+#include "persistInfer.h"
 
 #define MAX_QUERY 32
 
@@ -19,6 +20,8 @@ class CNNPersistFunction : public CNNFunction
 		//int volatile signalIn[20]; // 19 layers maximum
 		//int volatile SMs[20];
 		cudaDeviceProp prop;
+
+		cudaStream_t streams[MAX_LAYER_GROUP];
 
 	public:
 		virtual void init() override;

@@ -1,13 +1,13 @@
 CC = g++
 NVCC = nvcc
-NVFLAGS = -O3 -std=c++11 -I. -I./inc -gencode arch=compute_61,code=sm_61 --use_fast_math --ptxas-options=-v -lineinfo #-g -G 
+NVFLAGS = -O3 -std=c++11 -rdc=true -I. -I./inc -gencode arch=compute_61,code=sm_61 --use_fast_math --ptxas-options=-v -lineinfo #-g -G 
 CXXFLAGS = -O3 -Wunused-result
 LDFLAGS = -lm -lcublas -lcusparse -lcudnn
 TARGETS = vgg19 
 
 DEBUGFLAGS = -DDEBUG
 
-SRC = vgg19.cu cudaFunction.cu cudnnFunction.cu cublasFunction.cu function.cu util.cu persistFunction.cu
+SRC = vgg19.cu cudaFunction.cu cudnnFunction.cu cublasFunction.cu function.cu util.cu persistFunction.cu persistInfer.cu
 
 all: $(TARGETS)
 
