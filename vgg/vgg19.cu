@@ -95,7 +95,7 @@ int main(int argc, char **argv)
 	gettimeofday(&start, NULL);
 
 	func->convPersist(224, 3, 64, 0);
-	func->convPersist(224, 64, 64, 1);
+	// func->convPersist(224, 64, 64, 1);
 	
 	PersistInfer::signalIn[0] = 1;
 	__sync_synchronize();
@@ -109,14 +109,14 @@ int main(int argc, char **argv)
 	funcCudnn->readParameters(weights_file, bias_file);
 
 	funcCudnn->convolution(224, 3, 64, 0);
-	funcCudnn->convolution(224, 64, 64, 1);
+	// funcCudnn->convolution(224, 64, 64, 1);
 
 	int theWidth = 224;
 	int theFilters = 64;
 	checkCudaErrors(cudaDeviceSynchronize());
 
 	gridDim = (theWidth * theWidth * theFilters + blockDim - 1) / blockDim;
-	isSame<<<gridDim, blockDim>>>(func->featureMap[2], funcCudnn->featureOut, theWidth * theWidth, theFilters, false);
+	isSame<<<gridDim, blockDim>>>(func->featureMap[1], funcCudnn->featureOut, theWidth * theWidth, theFilters, false);
 	checkCudaErrors(cudaDeviceSynchronize());
 
 	return 0;
