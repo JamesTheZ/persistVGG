@@ -31,10 +31,24 @@ void CNNPersistFunction::init()
 	//}
 
 	// TODO: assign SM here.
+    if(newsignalIn == NULL)
+    {
+        printf("re-allocating signalIn\n");
+        int * temp = NULL;
+        checkCudaErrors(cudaMallocManaged(&temp, 20 * sizeof(int)));
+        newsignalIn = temp;
+    }
+    if(newSMs == NULL)
+    {
+        printf("re-allocating SMs\n");
+        int * temp = NULL;
+        checkCudaErrors(cudaMallocManaged(&temp, 20 * sizeof(int)));
+        newSMs = temp;
+    }
 	for(int i=0; i<20; i++)
 	{
-		PersistInfer::signalIn[i] = 0;
-		PersistInfer::SMs[i] = 1;
+		newsignalIn[i] = 0;
+		newSMs[i] = 1;
 	}
 	__sync_synchronize();
 
@@ -61,7 +75,7 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 		const int nFilters, const int nChannels, const int width, 
 		float* bias, float* fOut, int layerId, int totalBlocks,
 		int numBlockPerSM, int blockCapacity, int minSM, int maxSM,
-		int nDimX, int nDimY, int nDimZ)
+		int nDimX, int nDimY, int nDimZ, int* newsignalIn, int* newSMs)
 {
 	int smid = getSMId();
 	//printf("id: %d, min: %d, max: %d\n", smid, minSM, maxSM);
@@ -106,7 +120,7 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 		__shared__ int blockId;
 		if(threadIdx.x == 0)
 		{
-			int currentSignal = atomicAdd((int*)&PersistInfer::signalIn[layerId], 0);
+			int currentSignal = atomicAdd((int*)&newsignalIn[layerId], 0);
 			if(currentSignal == 1)
 				// if(signalIn[layerId] != 1) // 1 means current layer shoud be processed
 			{
@@ -270,10 +284,10 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 			}
 
 			initBlockId[layerId] = 0;
-			PersistInfer::signalIn[layerId] = 0;
+			newsignalIn[layerId] = 0;
 			__threadfence_system();
 
-			while(atomicCAS_system((int*)&PersistInfer::signalIn[layerId + 1], 0, 1) != 0)
+			while(atomicCAS_system((int*)&newsignalIn[layerId + 1], 0, 1) != 0)
 			{
 				__threadfence();
 			}
@@ -291,12 +305,12 @@ __global__ void convBiasReluPersist(float* fIn, float* filter,
 	}
 }
 
-template <int TILE_DEPTH, int BLOCK_WIDTH, int BLOCK_HEIGHT, int FILTER_NUM>
+template <int TILE_DEPTH, int BLOCK_WIDTH, int BLOCK_HEIGHT, int FILTER_NUM, int CHANNEL_NUM>
 __global__ void convBiasReluPersistReuseSharedMem(float* fIn, float* filter, 
 		const int nFilters, const int nChannels, const int width, 
 		float* bias, float* fOut, int layerId, int totalBlocks,
 		int numBlockPerSM, int blockCapacity, int minSM, int maxSM,
-		int nDimX, int nDimY, int nDimZ)
+		int nDimX, int nDimY, int nDimZ, int* newsignalIn, int* newSMs)
 {
 	int smid = getSMId();
 	//printf("id: %d, min: %d, max: %d\n", smid, minSM, maxSM);
@@ -320,7 +334,7 @@ __global__ void convBiasReluPersistReuseSharedMem(float* fIn, float* filter,
 	int const blockDim = BLOCK_WIDTH * BLOCK_HEIGHT;
 	int const tileDim = TILE_WIDTH * TILE_HEIGHT;
 
-	__shared__ float sFilter[3 * 3 * FILTER_NUM];
+	__shared__ float sFilter[3 * 3 * FILTER_NUM * CHANNEL_NUM];
 	__shared__ float sFeature[TILE_DEPTH * tileDim];
 
 	// row/col in the block
@@ -331,7 +345,7 @@ __global__ void convBiasReluPersistReuseSharedMem(float* fIn, float* filter,
 
 	if(threadIdx.x == 0)
 	{
-		for(int i = 0; i < 3*3*FILTER_NUM; ++i)
+		for(int i = 0; i < 3*3*FILTER_NUM * CHANNEL_NUM; ++i)
 		{
 			sFilter[i] = filter[i];
 		}
@@ -349,7 +363,7 @@ __global__ void convBiasReluPersistReuseSharedMem(float* fIn, float* filter,
 		__shared__ int blockId;
 		if(threadIdx.x == 0)
 		{
-			int currentSignal = atomicAdd((int*)&PersistInfer::signalIn[layerId], 0);
+			int currentSignal = atomicAdd((int*)&newsignalIn[layerId], 0);
 			if(currentSignal == 1)
 				// if(signalIn[layerId] != 1) // 1 means current layer shoud be processed
 			{
@@ -441,7 +455,7 @@ __global__ void convBiasReluPersistReuseSharedMem(float* fIn, float* filter,
 					}
 				}
 
-				//__syncthreads();
+				__syncthreads();
 
 #pragma unroll 1
 				for(int ft = 0; 
@@ -461,9 +475,9 @@ __global__ void convBiasReluPersistReuseSharedMem(float* fIn, float* filter,
 // 							sFilter[idx] = filter[((ft + filterId) * nChannels + sp * TILE_DEPTH) * 9 + idx];
 // 						}
 // 					}
-
-					// __syncthreads();
-
+//
+//					 __syncthreads();
+//
 					// calculate convolution
 					if(row < width && col < width)
 					{
@@ -475,6 +489,14 @@ __global__ void convBiasReluPersistReuseSharedMem(float* fIn, float* filter,
 							{
 								for(int j=0; j<3; j++)
 								{
+                                    //if(sFilter[subCh * 9 + i * 3 + j] != filter[((ft + filterId) * nChannels + sp * TILE_DEPTH) * 9 + subCh * 9 + i * 3 + j])
+                                    //{
+                                    //    printf("filter diff %f %f\n", sFilter[subCh * 9 + i * 3 + j] , filter[((ft + filterId) * nChannels + sp * TILE_DEPTH) * 9 + subCh * 9 + i * 3 + j]);
+                                    //}
+                                   // if(filter[((ft + filterId) * nChannels + sp * TILE_DEPTH) * 9 + subCh * 9 + i * 3 + j] != sFilter[((ft + filterId) * nChannels + sp * TILE_DEPTH) * 9 + subCh * 9 + i * 3 + j]){
+                                   //     printf("pos=%d\n", ((ft + filterId) * nChannels + sp * TILE_DEPTH) * 9 + subCh * 9 + i * 3 + j);
+                                   //     printf("filter diff %f %f\n", filter[((ft + filterId) * nChannels + sp * TILE_DEPTH) * 9 + subCh * 9 + i * 3 + j], sFilter[((ft + filterId) * nChannels + sp * TILE_DEPTH) * 9 + subCh * 9 + i * 3 + j]);
+                                   // }
 									sum[ft] += /*sFilter[subCh * 9 + i * 3 + j]*/sFilter[((ft + filterId) * nChannels + sp * TILE_DEPTH) * 9 + subCh * 9 + i * 3 + j]
 										* sFeature[subCh * tileDim + (blockR + i) * TILE_WIDTH + blockC + j];
 								}
@@ -519,13 +541,14 @@ __global__ void convBiasReluPersistReuseSharedMem(float* fIn, float* filter,
 			}
 
 			initBlockId[layerId] = 0;
-			PersistInfer::signalIn[layerId] = 0;
+			newsignalIn[layerId] = 0;
 			__threadfence_system();
 
-			while(atomicCAS_system((int*)&PersistInfer::signalIn[layerId + 1], 0, 1) != 0)
+			while(atomicCAS_system((int*)&newsignalIn[layerId + 1], 0, 1) != 0)
 			{
 				__threadfence();
 			}
+			// printf("cas layer %d to %d\n", layerId + 1, newsignalIn[layerId+1]);
 		}
 
 		// TODO: sync with cooperate group, otherwise there might be data race
@@ -567,18 +590,20 @@ void CNNPersistFunction::convPersist(int width, int nChannels, int nFilters, int
 	int sharedUsage = sizeof(float) * tileDepth * 
 		(3 * 3 + (blockWidth + 2) * (blockHeight + 2));
 	checkCudaErrors(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-				&numBlocksPerSM, (void*)convBiasReluPersist<tileDepth, blockWidth, blockHeight>, 
+				&numBlocksPerSM, (void*)convBiasReluPersistReuseSharedMem<tileDepth, blockWidth, blockHeight, tempFilterNum, 3>, 
 				blockSize, sharedUsage));
 
 	printf("numBlocksPerSM: %d, numSMs: %d, for layer %d\n", 
 			numBlocksPerSM, prop.multiProcessorCount, layerId);
 	fflush(NULL);
 
-	int layerSMs = PersistInfer::SMs[layerId];
+	int layerSMs = newSMs[layerId];
+	layerSMs = 20;
+	printf("kernel using sm num=%d\n", layerSMs);
 	int minSM = 0;
 	for(int i=0; i<layerId; i++)
 	{
-		minSM += PersistInfer::SMs[i];
+		minSM += newSMs[i];
 	}
 	int maxSM = minSM + layerSMs;
 	int blockCapacity = layerSMs * numBlocksPerSM;
@@ -620,13 +645,13 @@ void CNNPersistFunction::convPersist(int width, int nChannels, int nFilters, int
 	//			(void*)convBiasReluPersist<tileDepth, blockWidth, blockHeight>,
 	//			gridDimConv, blockDimConv, params, 0, stream));
 
-	// convBiasReluPersist<tileDepth, blockWidth, blockHeight>
-	convBiasReluPersistReuseSharedMem<tileDepth, blockWidth, blockHeight, tempFilterNum>
+	//convBiasReluPersist<tileDepth, blockWidth, blockHeight>
+	convBiasReluPersistReuseSharedMem<tileDepth, blockWidth, blockHeight, tempFilterNum, 3>
 		<<<gridDimConv, blockDimConv, 0, streams[layerId]>>>(
 			dInput, dFilter, nFilters, nChannels, 
 			width, bias[layerId], dOutput, layerId, 
 			totalBlocks, numBlocksPerSM, blockCapacity, minSM, maxSM,
-			nDimX, nDimY, nDimZ);
+			nDimX, nDimY, nDimZ, newsignalIn, newSMs);
 
 	//checkCudaErrors(cudaDeviceSynchronize());
 

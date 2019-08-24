@@ -1,6 +1,7 @@
 #include <iostream>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include <cuda.h>
 #include <cublas_v2.h>
@@ -81,7 +82,7 @@ int main(int argc, char **argv)
 	int blockDim = 256;
 	int gridDim;
 
-	CNNFunction *func = new CNNPersistFunction();
+	CNNPersistFunction *func = new CNNPersistFunction();
 	func->init();
 	func->readImage(image_file);
 	func->readParameters(weights_file, bias_file);
@@ -92,28 +93,43 @@ int main(int argc, char **argv)
 	//funcCudnn->convolution(224, 3, 64, 0);
 
 	checkCudaErrors(cudaDeviceSynchronize());
-	gettimeofday(&start, NULL);
+	// gettimeofday(&start, NULL);
 
 	func->convPersist(224, 3, 64, 0);
 	// func->convPersist(224, 64, 64, 1);
-	
-	PersistInfer::signalIn[0] = 1;
+	sleep(5);
+	gettimeofday(&start, NULL);
+	func->newsignalIn[0] = 1;
+
 	__sync_synchronize();
+    // while(!__sync_bool_compare_and_swap(&func->newsignalIn[1], 1, 3)) {
+	// }
+	checkCudaErrors(cudaDeviceSynchronize());
+	gettimeofday(&end, NULL);
+	struct timeval delta = timeDelta(start, end);
+	printTime(delta);
+
+	// printf("finish while loop\n");
 
 #ifdef DEBUG
-	checkCudaErrors(cudaDeviceSynchronize());
-
+	// return 0;
+	// checkCudaErrors(cudaDeviceSynchronize());
 	CNNFunction *funcCudnn = new CNNCudnnFunction();
 	funcCudnn->init();
 	funcCudnn->readImage(image_file);
 	funcCudnn->readParameters(weights_file, bias_file);
-
+	gettimeofday(&start, NULL);
 	funcCudnn->convolution(224, 3, 64, 0);
+	checkCudaErrors(cudaDeviceSynchronize());
+	gettimeofday(&end, NULL);
+	delta = timeDelta(start, end);
+	printTime(delta);
 	// funcCudnn->convolution(224, 64, 64, 1);
 
 	int theWidth = 224;
 	int theFilters = 64;
-	checkCudaErrors(cudaDeviceSynchronize());
+	// checkCudaErrors(cudaDeviceSynchronize());
+	sleep(3);
 
 	gridDim = (theWidth * theWidth * theFilters + blockDim - 1) / blockDim;
 	isSame<<<gridDim, blockDim>>>(func->featureMap[1], funcCudnn->featureOut, theWidth * theWidth, theFilters, false);
@@ -181,8 +197,8 @@ int main(int argc, char **argv)
 	
 	checkCudaErrors(cudaDeviceSynchronize());
 	gettimeofday(&end, NULL);
-	struct timeval delta = timeDelta(start, end);
-	printTime(delta);
+	// struct timeval delta = timeDelta(start, end);
+	// printTime(delta);
 
 	func->fullyConnected(7, 512, 4096, 16); // most time consuming file input
 	//funcCudnn->fullyConnected(7, 512, 4096, 16); // most time consuming file input

@@ -7,7 +7,6 @@
 #include "persistInfer.h"
 
 #define MAX_QUERY 32
-
 class CNNPersistFunction : public CNNFunction
 {
 	private:
@@ -28,9 +27,11 @@ class CNNPersistFunction : public CNNFunction
 		//virtual void convolution(int width, int nChannels, int nFilters, int layerId) override;
 		//virtual void fullyConnected(int width, int nChannels, int nFilters, int layerId) override;
 		//virtual void maxpool(int width, int nChannels) override;
-
+        int*  newsignalIn = NULL;
+        int*  newSMs = NULL;
 		void convPersist(int width, int nChannels, int nFilters, int layerId) override;
 		void maxpoolPersist(int width, int nChannels, int id);
+        
 
 	//private:
 	//	void relu(float* dArray, int size);
